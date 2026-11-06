@@ -57,8 +57,8 @@ Flutter 的 `Texture` 固定是 **RGBA8888**，HDR 元数据在这一步必然�
 | --- | --- | --- | --- |
 | 默认 gpu-next | `defaultGpuNext` | 关 | 所有片源默认用 gpu-next（libplacebo）出画：SDR 走纹理，HDR / 杜比视界走原生 SurfaceView。开启后「HDR 渲染后端」对 HDR / 杜比视界片源失效，改由下面的子选项决定 |
 | 渲染 API | `gpuNextApi` | `auto` | `auto`：SDR 走 gpu-next OpenGL，HDR / 杜比视界在关闭下一项后走 Vulkan；`vulkan`：SDR 纹理也走 Vulkan（初始化失败自动回退 OpenGL）；`opengl`：全部 OpenGL，兼容性最好，但 EGL 无法激发 HDR |
-| HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时**建议保持开启**：这是 OpenGL 模式下唯一能真正激发 HDR 的路径；关闭后 HDR 会被映射成 SDR |
-| 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | profile 5 的 IPTPQc2 依赖 RPU 元数据，`mediacodec-copy` 拿不到（会整体偏色），因此这类片源强制软解（`hwdec=no`） |
+| HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时**建议保持开启**：这是 OpenGL 模式下唯一能真正激发 HDR 的路径；关闭后 HDR 会被映射成 SDR。**杜比视界 profile 5 例外**：它的 IPTPQc2 只能由 libplacebo 还原，MediaCodec 出画会偏色，因此 profile 5 始终走 gpu-next，不受本项影响 |
+| 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | profile 5 的 IPTPQc2 依赖 RPU 元数据，`mediacodec-copy` 拿不到（会整体偏色），因此这类片源强制软解（`hwdec=no`）。profile 5 始终走 gpu-next，所以本项与上一项无关 |
 
 ## 三、原生出画层怎么工作
 
@@ -318,6 +318,12 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
    兼容模式」才会改用同分辨率 HDR10（125）。兼容模式只处理 profile 5；profile
    8/8.4 带 HDR10/HLG 基础层，始终保留 DoVi 直通。走 gpu-next 的 profile 5 会让
    窗口进入 HDR 模式（Vulkan 交换链按 HDR10 输出），这是正常行为。
+   开启「默认 gpu-next」后，profile 5 更进一步**强制**走 gpu-next：即使
+   「HDR / 杜比视界时切回 MediaCodec」开着，也不再交给 MediaCodec 直通，
+   因为解码器不会把 DoVi RPU 交回给应用，直通的结果就是整片偏色。
+   此时渲染 API 为 `opengl` 或 Vulkan 已被判定不可用时退回 `gpu-next-gl`，
+   色彩仍然正确，只是 EGL 无法激发 HDR，画面会被映射成 SDR。
+   HDR（125）与杜比视界 profile 8 仍按「切回 MediaCodec」的设置走直通。
 3. **手势限制**：原生 SurfaceView 是独立图层，无法跟随 Flutter 的旋转与镜像。
    HDR 直通时禁用双指旋转、自动重置镜像；缩放/平移通过矩形同步仍然可用。
 4. **PiP**：支持，但小窗圆角无法裁切原生图层（会看到直角视频）；

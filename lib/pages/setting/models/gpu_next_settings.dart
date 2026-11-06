@@ -54,9 +54,11 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
               ? '渲染 API 为 OpenGL 时建议保持开启：EGL 没有 HDR 交换链，'
                     'HDR / 杜比视界只有交给 MediaCodec 直通才能真正激发；'
                     '关闭后这类片源会被 libplacebo 映射成 SDR。'
+                    '杜比视界 profile 5 例外：它始终走 gpu-next，否则会偏色。'
               : 'HDR / 杜比视界片源改用 MediaCodec 直通出画'
                     '（mediacodec_embed），只让 SDR 片源走 gpu-next。'
-                    '关闭时 HDR / 杜比视界也交给 gpu-next 处理。',
+                    '关闭时 HDR / 杜比视界也交给 gpu-next 处理。'
+                    '杜比视界 profile 5 例外：它始终走 gpu-next，否则会偏色。',
           leading: const Icon(Icons.hdr_on),
           setKey: SettingBoxKey.gpuNextHdrMediaCodec,
           defaultVal: true,
@@ -65,12 +67,13 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
             setState(() {});
           },
         ),
-      if (Pref.defaultGpuNext && !Pref.gpuNextHdrMediaCodec)
+      if (Pref.defaultGpuNext)
         SwitchModel(
           title: '杜比视界 profile 5 软解',
           subtitle:
               'profile 5 的色彩要靠杜比视界 RPU 元数据还原，硬解拷贝拿不到这些元数据'
-              '会导致整体偏色。开启后这类片源改用软解渲染（更吃性能）。',
+              '会导致整体偏色；这类片源始终走 gpu-next（不受上一项影响）。'
+              '开启后改用软解渲染（更吃性能），关闭则用硬件拷贝解码。',
           leading: const Icon(Icons.color_lens_outlined),
           setKey: SettingBoxKey.gpuNextDoviSoft,
           defaultVal: true,

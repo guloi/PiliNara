@@ -620,8 +620,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   String? sourceCodecs;
 
   /// 当前片源是否为杜比视界 profile 5（dvh1.05/dvhe.05）。
-  bool get isDolbyVisionProfile5 =>
-      isDolbyVisionSource && (sourceCodecs?.contains('.05.') ?? false);
+  ///
+  /// profile 5 的色彩是 IPTPQc2，只能靠杜比视界 RPU 元数据还原。B 站的
+  /// 杜比视界片源基本都是 profile 5；拿不到 codecs 时也按 profile 5 处理，
+  /// 宁可多走一次 gpu-next，也不要按普通 HDR 处理导致整片偏色。
+  bool get isDolbyVisionProfile5 {
+    if (!isDolbyVisionSource) return false;
+    final codecs = sourceCodecs;
+    if (codecs == null || codecs.isEmpty) return true;
+    return codecs.contains('.05.');
+  }
 
   /// 当前窗口是否已被预切到 HDR 色彩模式。
   bool _windowHdrRequested = false;
@@ -687,6 +695,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// HDR / 杜比视界片源实际使用的出画后端。
   HdrBackend get _hdrOutputBackend {
+    // 杜比视界 profile 5 例外：色彩是 IPTPQc2，必须由 libplacebo 用 RPU
+    // 元数据还原。MediaCodec（直通或拷贝）都拿不到解码器解析出的 DoVi
+    // 元数据，交给它出画会整片偏色（发绿 / 发紫），所以这类片源强制走
+    // gpu-next，不再受「HDR / 杜比视界时切回 MediaCodec」影响。
+    if (_defaultGpuNext && isDolbyVisionProfile5) {
+      if (_gpuNextApi == GpuNextApi.opengl || _vulkanVoBlocked) {
+        // EGL 没有 HDR 交换链 / Vulkan 已判定不可用：至少保证色彩正确
+        // （libplacebo 会先把 IPTPQc2 还原再映射到 SDR）。
+        return HdrBackend.gpuNextGl;
+      }
+      return HdrBackend.gpuNext;
+    }
     // 「默认 gpu-next」开启且要求 HDR / 杜比视界切回 MediaCodec：
     // 由系统解码器直接送显，是 Android 上点亮 HDR 面板最稳的路径。
     // 这条判断必须放在 OpenGL 之前：EGL 没有 HDR 交换链，渲染 API 选了
@@ -701,7 +721,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       return HdrBackend.gpuNextGl;
     }
     if (_vulkanNextWanted) {
-      if (_vulkanVoUnavailable) {
+      if (_vulkanVoBlocked) {
         return _useHdrDirectFallback
             ? HdrBackend.mediacodecEmbed
             : HdrBackend.gpuNextGl;
@@ -724,6 +744,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 自动改用 gpu-next 的 OpenGL 上下文，避免用户每次都要手动切后端。
   static bool _vulkanVoUnavailable = false;
 
+  /// 上次判定 Vulkan 不可用的时间（配合 [_vulkanVoBlocked] 做冷却重试）。
+  static DateTime? _vulkanFallbackAt;
+
   /// 纹理出画路径上 gpu-next（OpenGL）是否已确认不可用。
   ///
   /// 部分老驱动不支持 libplacebo 需要的 GLSL 版本，纹理会整块变黑。检测到
@@ -736,7 +759,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 一次后本进程内改用同一 vo 的 OpenGL 上下文，避免一直黑屏。
   static bool _gpuNextVulkanTextureUnavailable = false;
 
-  bool get _shouldProbeVulkan => !_vulkanVoUnavailable && _vulkanNextWanted;
+  /// Vulkan 失败标记带 10 分钟冷却：冷却期内不再尝试（避免每部视频都黑屏
+  /// 一段时间），冷却结束自动重试，让「部分片源 / 部分时刻能正常激发」的
+  /// 设备自愈。
+  static bool get _vulkanVoBlocked {
+    if (!_vulkanVoUnavailable) return false;
+    final at = _vulkanFallbackAt;
+    return at == null ||
+        DateTime.now().difference(at) < const Duration(minutes: 10);
+  }
+
+  bool get _shouldProbeVulkan => !_vulkanVoBlocked && _vulkanNextWanted;
 
   /// Vulkan 不可用时，HDR 片源是否改走 MediaCodec 直通。
   ///
@@ -746,8 +779,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   bool get _useHdrDirectFallback =>
       Pref.enableHA &&
       isHdrSource &&
-      // 杜比视界仍按原有兼容/Media3 逻辑处理，避免 profile 5 偏色。
-      !isDolbyVisionSource &&
+      // profile 5 的 DoVi 元数据只有软解 + libplacebo 才拿得到，交给
+      // MediaCodec 会偏色；profile 8 的基底就是 HDR10，直通反而更稳。
+      !isDolbyVisionProfile5 &&
       !isHdrVividSource;
 
   /// 纹理出画时使用的后端（SDR 片源默认走这里）。
@@ -766,9 +800,22 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   HdrBackend get _renderBackend =>
       _wantNativeSurface ? _hdrOutputBackend : _textureBackend;
 
+  /// 原生 SurfaceView 是否申请 10bit 缓冲格式。
+  ///
+  /// 由 gpu-next（libplacebo）渲染到 Surface 时请求 10bit，给 HDR / 杜比
+  /// 视界留出位深；MediaCodec 直通时缓冲格式由解码器决定，不能强设，
+  /// 否则部分设备直通会失败（此时颜色也由解码器负责）。
+  bool get nativeSurfaceWantsTenBit {
+    if (!_defaultGpuNext) {
+      return _configuredBackend != HdrBackend.mediacodecEmbed;
+    }
+    return _hdrOutputBackend != HdrBackend.mediacodecEmbed;
+  }
+
   /// 设置页切换后端时调用，允许用户主动重试 Vulkan。
   static void resetVulkanFallback() {
     _vulkanVoUnavailable = false;
+    _vulkanFallbackAt = null;
     _gpuNextTextureUnavailable = false;
     _gpuNextVulkanTextureUnavailable = false;
   }
@@ -1304,8 +1351,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           '直通出画: ${Pref.hdrSurface ? '开' : '关'}，'
           '后端: ${_renderBackend.label} (${_renderBackend.gpuApi ?? '-'})'
           '${_renderBackend != HdrBackend.fromValue(Pref.hdrBackend) ? '，已自动回退（原 ${HdrBackend.fromValue(Pref.hdrBackend).label}）' : ''}',
-      'Vulkan 自动回退: ${_vulkanVoUnavailable ? '已触发（当前 libmpv 缺少 SPIR-V 编译器）' : '未触发'}',
-      '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 && Pref.gpuNextDoviSoft ? '，profile 5 软解' : ''}）' : '关'}',
+      'Vulkan 自动回退: ${_vulkanVoBlocked ? '已触发（跳过 Vulkan，10 分钟后自动重试）' : (_vulkanVoUnavailable ? '冷却已过，下次播放重试 Vulkan' : '未触发')}',
+      '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 ? '，profile 5 强制 gpu-next${Pref.gpuNextDoviSoft ? ' + 软解' : ''}' : ''}）' : '关'}',
       if (native && _renderBackend.gpuApi == 'vulkan')
         'Vulkan HDR 窗口: ${read('options/android-vulkan-hdr')}'
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
@@ -1379,6 +1426,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// Vulkan VO 可用性检查：创建失败时自动回退到 gpu-next OpenGL。
   Timer? _vulkanCheckTimer;
   Timer? _vulkanTextureCheckTimer;
+
+  /// vo 错误日志的复核计时器（2 秒后复查 vo-configured）。
+  Timer? _vulkanLogConfirmTimer;
 
   /// 最近一次 SurfaceView 画面采样结果（平均亮度；0 表示全黑）。
   int? _lastProbeMean;
@@ -1464,33 +1514,44 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _scheduleVulkanVoCheckAttempt(0);
   }
 
-  /// VO 初始化可能比首帧更晚（大文件解析、驱动首次编译管线），因此查三次：
-  /// 2.5 / 5 / 7.5 秒时都不是 yes 才判定 Vulkan 不可用。
-  void _scheduleVulkanVoCheckAttempt(int attempt) {
+  /// VO 初始化可能比首帧更晚（大文件解析、驱动首次编译管线、网络缓冲），
+  /// 因此最多查四次（约 3 / 6 / 10 / 15 秒）；播放器还在缓冲时顺延，
+  /// 避免把「卡在缓冲」误判成 Vulkan 不可用。
+  void _scheduleVulkanVoCheckAttempt(int attempt, {int stalls = 0}) {
     _vulkanCheckTimer?.cancel();
-    _vulkanCheckTimer = Timer(const Duration(milliseconds: 2500), () {
-      _vulkanCheckTimer = null;
-      final player = _videoPlayerController;
-      if (player == null) return;
-      if (!nativeSurfaceMode.value || _useMedia3Dovi) return;
-      if (_appliedBackend != HdrBackend.gpuNext) return;
-      if (!player.state.playing) return;
-      var configured = '';
-      try {
-        configured = player.getProperty('vo-configured');
-      } catch (_) {}
-      if (configured == 'yes') return;
-      // 最多查三次（约 2.5 / 5 / 7.5 秒）：HDR 大文件解析、驱动首次编译管线
-      // 都可能让 VO 比首帧更晚配置好。只查一两次会把「只是慢」误判成失败，
-      // 这正是 HDR 片源动不动就自动回退的主要原因。
-      if (attempt < 2) {
-        _scheduleVulkanVoCheckAttempt(attempt + 1);
-        return;
-      }
-      _fallbackFromVulkan(
-        'vo-configured="$configured", video=${player.state.width > 0}',
-      );
-    });
+    const delays = [3000, 3000, 4000, 5000];
+    _vulkanCheckTimer = Timer(
+      Duration(
+        milliseconds:
+            delays[attempt < delays.length ? attempt : delays.length - 1],
+      ),
+      () {
+        _vulkanCheckTimer = null;
+        final player = _videoPlayerController;
+        if (player == null) return;
+        if (!nativeSurfaceMode.value || _useMedia3Dovi) return;
+        if (_appliedBackend != HdrBackend.gpuNext) return;
+        if (!player.state.playing) return;
+        // 缓冲中解码器还没送出首帧，vo-configured 必然是 no；最多顺延 60 秒。
+        if (player.state.buffering && stalls < 20) {
+          _scheduleVulkanVoCheckAttempt(attempt, stalls: stalls + 1);
+          return;
+        }
+        var configured = '';
+        try {
+          configured = player.getProperty('vo-configured');
+        } catch (_) {}
+        if (configured == 'yes') return;
+        if (attempt < 3) {
+          _scheduleVulkanVoCheckAttempt(attempt + 1, stalls: stalls);
+          return;
+        }
+        _fallbackFromVulkan(
+          'vo-configured="$configured", video=${player.state.width > 0}, '
+          'buffering=${player.state.buffering}',
+        );
+      },
+    );
   }
 
   /// 把失败的 Vulkan VO 切到 gpu-next OpenGL。
@@ -1509,6 +1570,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       '${direct ? 'mediacodec_embed (HDR)' : 'gpu-next OpenGL (SDR)'}',
     );
     _vulkanVoUnavailable = true;
+    _vulkanFallbackAt = DateTime.now();
     SmartDialog.showToast(
       direct
           ? 'Vulkan 输出不可用，已自动回退到 MediaCodec 直通（HDR）'
@@ -1534,6 +1596,54 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _scheduleNativeProbe();
   }
 
+  /// 单条 vo 错误日志不足以判定 Vulkan 不可用：重建 VO、窗口尺寸变化、
+  /// 换视频轨时都可能瞬时打一条 error。这里先记下原因，2 秒后复查
+  /// vo-configured，仍然是 no 才真正回退。
+  void _confirmVulkanFailureFromLog(String line) {
+    if (_vulkanVoUnavailable) return;
+    _lastFallbackReason = line;
+    _vulkanLogConfirmTimer?.cancel();
+    _vulkanLogConfirmTimer = Timer(const Duration(seconds: 2), () {
+      _vulkanLogConfirmTimer = null;
+      final player = _videoPlayerController;
+      if (player == null) return;
+      if (!nativeSurfaceMode.value || _useMedia3Dovi) return;
+      if (_appliedBackend != HdrBackend.gpuNext) return;
+      var configured = '';
+      try {
+        configured = player.getProperty('vo-configured');
+      } catch (_) {}
+      if (configured == 'yes') {
+        debugPrint('[HDR] 忽略瞬时 VO 报错: $line');
+        return;
+      }
+      _fallbackFromVulkan(line);
+    });
+  }
+
+  /// 纹理路径同理：瞬时 vo 报错先复核一次再决定是否回退 OpenGL。
+  void _confirmVulkanTextureFailureFromLog(String line) {
+    if (_gpuNextVulkanTextureUnavailable) return;
+    _lastFallbackReason = line;
+    _vulkanLogConfirmTimer?.cancel();
+    _vulkanLogConfirmTimer = Timer(const Duration(seconds: 2), () {
+      _vulkanLogConfirmTimer = null;
+      final player = _videoPlayerController;
+      if (player == null) return;
+      if (nativeSurfaceMode.value || _useMedia3Dovi) return;
+      if (_textureBackend != HdrBackend.gpuNext) return;
+      var configured = '';
+      try {
+        configured = player.getProperty('vo-configured');
+      } catch (_) {}
+      if (configured == 'yes') {
+        debugPrint('[HDR] 忽略瞬时 VO 报错: $line');
+        return;
+      }
+      _fallbackFromGpuNextVulkanTexture(line);
+    });
+  }
+
   /// 纹理出画路径上 gpu-next 初始化失败时退回 gpu。
   ///
   /// 纹理无法像原生 Surface 那样立刻重建出画，这里只记录回退标记并提示，
@@ -1553,35 +1663,49 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   void _scheduleTextureVulkanVoCheck() {
     _vulkanTextureCheckTimer?.cancel();
     _vulkanTextureCheckTimer = null;
+    _vulkanLogConfirmTimer?.cancel();
+    _vulkanLogConfirmTimer = null;
     if (nativeSurfaceMode.value || _useMedia3Dovi) return;
     if (_textureBackend != HdrBackend.gpuNext) return;
     _scheduleTextureVulkanVoCheckAttempt(0);
   }
 
-  /// 与 [_scheduleVulkanVoCheckAttempt] 同理：纹理路径也查三次再回退，
-  /// 避免首帧解码慢时把正常工作的 Vulkan 纹理误判成失败。
-  void _scheduleTextureVulkanVoCheckAttempt(int attempt) {
+  /// 与 [_scheduleVulkanVoCheckAttempt] 同理：纹理路径也查四次（约
+  /// 3 / 6 / 10 / 15 秒），缓冲期间顺延，避免把首帧慢误判成失败。
+  void _scheduleTextureVulkanVoCheckAttempt(int attempt, {int stalls = 0}) {
     _vulkanTextureCheckTimer?.cancel();
-    _vulkanTextureCheckTimer = Timer(const Duration(milliseconds: 2500), () {
-      _vulkanTextureCheckTimer = null;
-      final player = _videoPlayerController;
-      if (player == null) return;
-      if (nativeSurfaceMode.value || _useMedia3Dovi) return;
-      if (_textureBackend != HdrBackend.gpuNext) return;
-      if (!player.state.playing) return;
-      var configured = '';
-      try {
-        configured = player.getProperty('vo-configured');
-      } catch (_) {}
-      if (configured == 'yes') return;
-      if (attempt < 2) {
-        _scheduleTextureVulkanVoCheckAttempt(attempt + 1);
-        return;
-      }
-      _fallbackFromGpuNextVulkanTexture(
-        'vo-configured="$configured", video=${player.state.width > 0}',
-      );
-    });
+    const delays = [3000, 3000, 4000, 5000];
+    _vulkanTextureCheckTimer = Timer(
+      Duration(
+        milliseconds:
+            delays[attempt < delays.length ? attempt : delays.length - 1],
+      ),
+      () {
+        _vulkanTextureCheckTimer = null;
+        final player = _videoPlayerController;
+        if (player == null) return;
+        if (nativeSurfaceMode.value || _useMedia3Dovi) return;
+        if (_textureBackend != HdrBackend.gpuNext) return;
+        if (!player.state.playing) return;
+        if (player.state.buffering && stalls < 20) {
+          _scheduleTextureVulkanVoCheckAttempt(attempt, stalls: stalls + 1);
+          return;
+        }
+        var configured = '';
+        try {
+          configured = player.getProperty('vo-configured');
+        } catch (_) {}
+        if (configured == 'yes') return;
+        if (attempt < 3) {
+          _scheduleTextureVulkanVoCheckAttempt(attempt + 1, stalls: stalls);
+          return;
+        }
+        _fallbackFromGpuNextVulkanTexture(
+          'vo-configured="$configured", video=${player.state.width > 0}, '
+          'buffering=${player.state.buffering}',
+        );
+      },
+    );
   }
 
   /// 纹理出画路径上 gpu-next Vulkan 失败时退回 OpenGL 上下文。
@@ -1897,6 +2021,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _vulkanCheckTimer = null;
     _vulkanTextureCheckTimer?.cancel();
     _vulkanTextureCheckTimer = null;
+    _vulkanLogConfirmTimer?.cancel();
+    _vulkanLogConfirmTimer = null;
     if (!keepSurface) {
       _nativeOwner = null;
       _nativeWid = null;
@@ -2352,10 +2478,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           text.contains('could not create'))) {
         return;
       }
+      // 先复核再回退：VO 重建、窗口 resize、切轨时都可能瞬时报错
       if (nativeSurfaceMode.value) {
-        _fallbackFromVulkan(line);
+        _confirmVulkanFailureFromLog(line);
       } else if (_appliedTextureBackend == HdrBackend.gpuNext) {
-        _fallbackFromGpuNextVulkanTexture(line);
+        _confirmVulkanTextureFailureFromLog(line);
       }
     });
 

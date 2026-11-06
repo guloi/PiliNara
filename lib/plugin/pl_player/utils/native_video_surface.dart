@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:math' show max, min;
 
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
-import 'package:PiliPlus/plugin/pl_player/models/hdr_config.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/native_video_surface_channel.dart';
-import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -65,14 +63,9 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
   ///
   /// 由 gpu-next（libplacebo）自己渲染到 Surface 时请求 10bit 缓冲，给 HDR
   /// 留出位深；交给 MediaCodec 直通（mediacodec_embed）时缓冲格式由解码器
-  /// 决定，不能强设，否则部分设备直通会失败。
-  bool get _wantTenBit {
-    if (Pref.defaultGpuNext) {
-      final mediacodecDirect = Pref.gpuNextHdrMediaCodec && Pref.enableHA;
-      return !mediacodecDirect;
-    }
-    return HdrBackend.fromValue(Pref.hdrBackend) != HdrBackend.mediacodecEmbed;
-  }
+  /// 决定，不能强设，否则部分设备直通会失败。实际后端由控制器决定
+  /// （杜比视界 profile 5 会强制走 gpu-next），这里直接问它。
+  bool get _wantTenBit => widget.controller.nativeSurfaceWantsTenBit;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {

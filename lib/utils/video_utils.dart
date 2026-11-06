@@ -258,9 +258,9 @@ abstract final class VideoUtils {
     // 不需要为了兼容而换成 HDR10。用户选择 gpu-next 时优先保留 DoVi。
     final backend = HdrBackend.fromValue(Pref.hdrBackend);
     if (backend.supportsDolbyVision) return quality;
-    // 「默认 gpu-next」开启且 HDR / 杜比视界不切回 MediaCodec 时，实际出画
-    // 后端是 gpu-next；即使存储的渲染后端是 mediacodec_embed，也要保留 DoVi。
-    if (Pref.defaultGpuNext && !Pref.gpuNextHdrMediaCodec) return quality;
+    // 「默认 gpu-next」开启时杜比视界 profile 5 一定走 gpu-next（它的
+    // IPTPQc2 只能由 libplacebo 还原，MediaCodec 出画会偏色），因此保留 126。
+    if (Pref.defaultGpuNext) return quality;
     // Media3 真 DoVi 实验开启时保留 126，不回退 HDR10。
     if (Pref.media3Dovi) return quality;
     if (!Pref.dolbyVisionFallback) return quality;
