@@ -63,12 +63,13 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
 
   /// 原生 SurfaceView 是否申请 10bit 缓冲格式。
   ///
-  /// 「默认 gpu-next」开启时由渲染 API 决定：HDR 交给 MediaCodec 直通或走
-  /// Vulkan 都需要 10bit，只有 OpenGL 渲染 API 仍然只输出 SDR。
+  /// 由 gpu-next（libplacebo）自己渲染到 Surface 时请求 10bit 缓冲，给 HDR
+  /// 留出位深；交给 MediaCodec 直通（mediacodec_embed）时缓冲格式由解码器
+  /// 决定，不能强设，否则部分设备直通会失败。
   bool get _wantTenBit {
     if (Pref.defaultGpuNext) {
-      if (Pref.gpuNextHdrMediaCodec) return true;
-      return Pref.gpuNextApi != GpuNextApi.opengl;
+      final mediacodecDirect = Pref.gpuNextHdrMediaCodec && Pref.enableHA;
+      return !mediacodecDirect;
     }
     return HdrBackend.fromValue(Pref.hdrBackend) != HdrBackend.mediacodecEmbed;
   }

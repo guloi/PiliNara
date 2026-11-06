@@ -51,8 +51,9 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
         SwitchModel(
           title: 'HDR / 杜比视界时切回 MediaCodec',
           subtitle: api == GpuNextApi.opengl
-              ? '渲染 API 为 OpenGL 时不生效：HDR / 杜比视界同样由 gpu-next 处理，'
-                    '画面会被映射成 SDR。'
+              ? '渲染 API 为 OpenGL 时建议保持开启：EGL 没有 HDR 交换链，'
+                    'HDR / 杜比视界只有交给 MediaCodec 直通才能真正激发；'
+                    '关闭后这类片源会被 libplacebo 映射成 SDR。'
               : 'HDR / 杜比视界片源改用 MediaCodec 直通出画'
                     '（mediacodec_embed），只让 SDR 片源走 gpu-next。'
                     '关闭时 HDR / 杜比视界也交给 gpu-next 处理。',
@@ -64,9 +65,7 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
             setState(() {});
           },
         ),
-      if (Pref.defaultGpuNext &&
-          !Pref.gpuNextHdrMediaCodec &&
-          api != GpuNextApi.opengl)
+      if (Pref.defaultGpuNext && !Pref.gpuNextHdrMediaCodec)
         SwitchModel(
           title: '杜比视界 profile 5 软解',
           subtitle:

@@ -56,8 +56,8 @@ Flutter 的 `Texture` 固定是 **RGBA8888**，HDR 元数据在这一步必然�
 | 设置项 | 存储键 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | 默认 gpu-next | `defaultGpuNext` | 关 | 所有片源默认用 gpu-next（libplacebo）出画：SDR 走纹理，HDR / 杜比视界走原生 SurfaceView。开启后「HDR 渲染后端」对 HDR / 杜比视界片源失效，改由下面的子选项决定 |
-| 渲染 API | `gpuNextApi` | `auto` | `auto`：HDR / 杜比视界走 Vulkan、SDR 走 OpenGL；`vulkan`：SDR 纹理也走 Vulkan（初始化失败自动回退 OpenGL）；`opengl`：全部 OpenGL，HDR 会被映射成 SDR，兼容性最好 |
-| HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时该项不生效 |
+| 渲染 API | `gpuNextApi` | `auto` | `auto`：SDR 走 gpu-next OpenGL，HDR / 杜比视界在关闭下一项后走 Vulkan；`vulkan`：SDR 纹理也走 Vulkan（初始化失败自动回退 OpenGL）；`opengl`：全部 OpenGL，兼容性最好，但 EGL 无法激发 HDR |
+| HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时**建议保持开启**：这是 OpenGL 模式下唯一能真正激发 HDR 的路径；关闭后 HDR 会被映射成 SDR |
 | 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | profile 5 的 IPTPQc2 依赖 RPU 元数据，`mediacodec-copy` 拿不到（会整体偏色），因此这类片源强制软解（`hwdec=no`） |
 
 ## 三、原生出画层怎么工作
@@ -219,13 +219,23 @@ fork 的 `androidvk` 上下文据此把 `ANativeWindow` 切成 BT.2020/PQ datasp
 `pl_swapchain_colorspace_hint`，显示端（SurfaceFlinger / 面板）才会真正进入 HDR。
 旧 libmpv 没有这个选项时只会打一条未知选项 warning，行为与以前一致：画面正常，但面板不激发。
 
-**自动回退**：播放开始 2.5 秒后读取 `vo-configured`；若仍为 `no`，说明当前
-libmpv 的 Vulkan VO 初始化失败（最常见原因就是缺 shaderc），应用会设置
-`_vulkanVoUnavailable` 并自动回退：HDR 片源改用 `mediacodec_embed` 直通，
-保住面板 HDR 亮度；SDR / 杜比兼容路径改用 `gpu-next OpenGL`。回退时重新下
+**自动回退**：三个触发点。
+
+1. mpv 的 `vo/*` 错误日志（`stream.log` 里 level=error 且文本含 `vulkan` /
+   `swapchain` / `spir-v` / `failed to create`）——最快，原生 Vulkan 建不起
+   交换链时立刻回退；
+2. `stream.error`（media_kit 只转发 file/ffmpeg/vd/ad/cplayer/stream 前缀，
+   `vo/*` 不会出现在这里，只能覆盖部分情况）；
+3. 播放开始 2.5 / 5 / 7.5 秒各读一次 `vo-configured`，三次都不是 `yes` 才判
+   失败（只查一两次容易把「首帧解码慢、VO 还没建好」误判成失败，这正是之前
+   HDR 下 gpu-next 动不动就回退的原因之一）。
+
+判失败后设置 `_vulkanVoUnavailable` 并回退：HDR 片源改用 `mediacodec_embed`
+直通，保住面板 HDR 亮度；SDR / 杜比兼容路径改用 `gpu-next OpenGL`。回退时重新下
 `vo/wid`；SDR / OpenGL 路径会关闭窗口 HDR 预切。状态诊断会显示「已自动回退
-（原 gpu-next Vulkan）」以及「Vulkan 自动回退: 已触发」。设置页重新选择后端
-会清除该标记，允许再次尝试 Vulkan。
+（原 gpu-next Vulkan）」「Vulkan 自动回退: 已触发」，并新增「自动回退原因」与
+「mpv 错误」两行（最后一条 error 级 mpv 日志），便于回报真实失败文本。
+设置页重新选择后端会清除该标记，允许再次尝试 Vulkan。
 
 ### 4.3 gpu-next OpenGL / gpu（兼容）
 
@@ -286,13 +296,19 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
 ## 六、平台能力与已知限制
 
 1. **gpu-next Vulkan 仍是实验路径**。libmpv fork 增加了 `ra_ctx_vulkan_android`，
-   gpu-next 可通过 `VK_EXT_swapchain_colorspace` 请求 HDR10 交换链；但 fork 的
-   `video/out/vulkan/context_android.c` 只调用 `ANativeWindow_setBuffersGeometry`，
-   没有调用 `ANativeWindow_setBuffersDataSpace`，部分 ROM 仍可能把 Vulkan 交换链
-   当 SDR 合成（表现为画面正常但面板不切 HDR，或颜色发灰）。**确定能点亮 HDR 的
-   仍是 `mediacodec_embed`**；Vulkan 路径因设备驱动差异或 libmpv 缺少 shaderc
-   可能黑屏。应用已内置 `vo-configured` 检测：HDR 片源自动回退到
-   `mediacodec_embed` 直通，SDR 路径回退 `gpu-next-gl`；也可以手动切后端。
+   gpu-next 可通过 `VK_EXT_swapchain_colorspace` 请求 HDR10 交换链。但**必须用带
+   `android-vulkan-hdr` patch（见 4.4）重新构建的 libmpv**：线上旧的
+   `libmpv-latest` 里 `video/out/vulkan/context_android.c` 只调用
+   `ANativeWindow_setBuffersGeometry`，没有 `ANativeWindow_setBuffersDataSpace`，
+   Vulkan 交换链会被 ROM 当 SDR 合成（画面正常但面板不切 HDR，或颜色发灰）；
+   带上 patch 之前请求 `target-colorspace-hint=yes` 还可能让部分驱动的交换链直接
+   创建失败，于是触发「自动回退」。**确定能点亮 HDR 的仍是 `mediacodec_embed`**；
+   Vulkan 路径因设备驱动差异或 libmpv 缺少 shaderc 也可能黑屏。应用已内置日志 +
+   `vo-configured` 双重检测：HDR 片源自动回退到 `mediacodec_embed` 直通，
+   SDR 路径回退 `gpu-next-gl`；也可以手动切后端。
+   另外：原生 SurfaceView 只在 gpu-next（libplacebo）自己渲染时请求 10bit
+   缓冲（`RGBA_1010102`）；HDR 交给 MediaCodec 直通时缓冲格式由解码器决定，
+   不再强设，避免直通失败。
    此外 fork 的构建矩阵里 `MPV_VULKAN` 与 `LIBPLACEBO_VULKAN` 必须同时打开；只开
    其中一个会出现 GL/mediacodec 输出全黑（fork 提交 `effde5e` 用于二分定位）。
 2. **杜比视界 profile 5**：使用 IPTPQc2 色彩空间，`mediacodec_embed` 直通会把它

@@ -134,9 +134,18 @@ enum HdrBackend {
 /// * [opengl]：全部走 OpenGL，兼容性最好，但 Android 的 EGL 路径没有 HDR
 ///   交换链，HDR 片源只能由 libplacebo 映射成 SDR。
 enum GpuNextApi {
-  auto('auto', '自动（推荐）', 'HDR / 杜比视界走 Vulkan，SDR 走 gpu-next OpenGL'),
+  auto(
+    'auto',
+    '自动（推荐）',
+    'SDR 走 gpu-next OpenGL；关闭「切回 MediaCodec」后 HDR / 杜比视界走 Vulkan',
+  ),
   vulkan('vulkan', 'Vulkan', '全部走 Vulkan 交换链，HDR 激发最完整，兼容性依赖驱动'),
-  opengl('opengl', 'OpenGL', '全部走 gpu-next OpenGL，兼容性最好，HDR 会被映射成 SDR');
+  opengl(
+    'opengl',
+    'OpenGL',
+    '全部走 gpu-next OpenGL，兼容性最好；EGL 无法激发 HDR，'
+        'HDR / 杜比视界要靠「切回 MediaCodec」',
+  );
 
   const GpuNextApi(this.value, this.label, this.desc);
 
