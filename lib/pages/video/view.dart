@@ -75,6 +75,7 @@ import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/android/bindings.g.dart';
 import 'package:PiliPlus/utils/extension/scroll_controller_ext.dart';
 import 'package:PiliPlus/utils/extension/theme_ext.dart';
+import 'package:PiliPlus/utils/feed_back.dart';
 import 'package:PiliPlus/utils/image_utils.dart';
 import 'package:PiliPlus/utils/max_screen_size.dart';
 import 'package:PiliPlus/utils/mobile_observer.dart';
@@ -193,6 +194,11 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
   );
 
   void _setupPortraitSlide() {
+    if (!Pref.portraitSlideVideo) {
+      // 关闭开关后丢掉整条推荐流，重新开启时从当前视频重新取
+      PortraitFeedService.instance.reset();
+      return;
+    }
     if (!_portraitSlideSupported) {
       return;
     }
@@ -201,6 +207,19 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
       ..onPortraitSlideEnabled = _enablePortraitSlide
       ..onPortraitSlideUp = _portraitSlideNext
       ..onPortraitSlideDown = _portraitSlidePrev;
+    _preloadPortraitFeed();
+  }
+
+  /// 后台预取下一个视频，上滑时就能立刻出画；失败则等真正上滑时再取
+  void _preloadPortraitFeed() {
+    if (!_portraitSlideSupported) {
+      return;
+    }
+    final String bvid = videoDetailController.bvid;
+    if (bvid.isEmpty) {
+      return;
+    }
+    PortraitFeedService.instance.preloadNext(currentBvid: bvid);
   }
 
   bool _enablePortraitSlide() => _portraitSlideMode;
@@ -229,24 +248,34 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
     );
   }
 
-  Future<bool> _portraitSlideNext() async {
+  Future<bool> _portraitSlideNext([bool showToast = true]) async {
     if (_portraitSliding || !_portraitSlideMode) {
       return false;
     }
     _portraitSliding = true;
+    final service = PortraitFeedService.instance;
+    service.push(_currentFeedItem);
     try {
-      final service = PortraitFeedService.instance;
-      service.push(_currentFeedItem);
       final item = await service.next(currentBvid: videoDetailController.bvid);
       if (item == null) {
-        SmartDialog.showToast('没有更多视频了');
+        // 没刷出新视频时把入栈的当前视频退回去，免得「下滑」回到的是自己
+        service.pop();
+        if (showToast) {
+          SmartDialog.showToast('没有更多推荐视频了');
+        }
         return false;
       }
       final ok = await _switchPortraitFeed(item);
       if (!ok) {
         service.pop();
+        if (showToast) {
+          SmartDialog.showToast('切换视频失败，请重试');
+        }
+        return false;
       }
-      return ok;
+      feedBack();
+      _preloadPortraitFeed();
+      return true;
     } finally {
       _portraitSliding = false;
     }
@@ -256,14 +285,24 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
     if (_portraitSliding || !_portraitSlideMode) {
       return false;
     }
-    final item = PortraitFeedService.instance.pop();
+    final service = PortraitFeedService.instance;
+    final item = service.pop();
     if (item == null) {
       SmartDialog.showToast('已经是第一个视频');
       return false;
     }
     _portraitSliding = true;
     try {
-      return await _switchPortraitFeed(item);
+      final ok = await _switchPortraitFeed(item);
+      if (!ok) {
+        // 切换失败就把上一个视频放回栈顶，再滑一次还能重试
+        service.push(item);
+        SmartDialog.showToast('切换视频失败，请重试');
+        return false;
+      }
+      feedBack();
+      _preloadPortraitFeed();
+      return true;
     } finally {
       _portraitSliding = false;
     }
@@ -846,7 +885,8 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
 
       if (_portraitSlideActive &&
           plPlayerController!.playRepeat != PlayRepeat.singleCycle) {
-        if (await _portraitSlideNext()) {
+        // 自动上滑失败时不弹 toast，交给下面的连播/循环逻辑兜底
+        if (await _portraitSlideNext(false)) {
           return;
         }
       }

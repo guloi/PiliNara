@@ -46,10 +46,10 @@ android {
     }
 }
 
-// PiliNara 使用 Gahiao/libmpv-android-video-build 的滚动 release：
+// PiliNara 使用 guloi/libmpv-android-video-build 的滚动 release：
 // 每次 fork 的 Actions 构建都会更新 libmpv-latest，App 构建时自动拉最新 jar。
 // 不再优先使用 android/libs 下的本地 jar，避免工作区残留旧库导致「以为更新了其实没更新」。
-def libmpvBaseUrl = "https://github.com/Gahiao/libmpv-android-video-build/releases/latest/download"
+def libmpvBaseUrl = "https://github.com/guloi/libmpv-android-video-build/releases/latest/download"
 def libmpvAbis = ["arm64-v8a", "armeabi-v7a", "x86_64"]
 
 def sha256 = { File file ->

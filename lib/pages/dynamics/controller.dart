@@ -133,7 +133,7 @@ class DynamicsController
         EasyThrottle.throttle(
           'topOrRefresh',
           const Duration(milliseconds: 500),
-          onRefresh,
+          showRefresh,
         );
       } else {
         animateToTop();

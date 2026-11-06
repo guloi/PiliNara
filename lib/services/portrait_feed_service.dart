@@ -2,7 +2,6 @@ import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/http/search.dart';
 import 'package:PiliPlus/http/video.dart';
 import 'package:PiliPlus/models/model_hot_video_item.dart';
-import 'package:PiliPlus/models/model_rec_video_item.dart';
 import 'package:PiliPlus/models_new/video/video_detail/dimension.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
 
@@ -41,6 +40,12 @@ class PortraitFeedService {
   bool _filling = false;
   int _homeIdx = 0;
   bool _refreshing = false;
+  // 预取的下一个视频与它的锚点 bvid：只在同一个「当前视频」上滑时复用，
+  // 锚点变了就丢弃，避免用户绕回来时拿到过期的推荐。
+  PortraitFeedItem? _prefetched;
+  String? _prefetchedFor;
+  Future<void>? _prefetchFuture;
+  String? _prefetchFor;
   DateTime? _lastRefreshAt;
   static const Duration _refreshCooldown = Duration(seconds: 5);
   final Set<String> _rejected = <String>{};
@@ -59,6 +64,7 @@ class PortraitFeedService {
     if (index == -1) {
       _queue.clear();
       _history.clear();
+      _dropPrefetch();
     } else {
       _history.removeRange(index, _history.length);
     }
@@ -75,16 +81,32 @@ class PortraitFeedService {
     }
   }
 
-  PortraitFeedItem? pop() => _history.isEmpty ? null : _history.removeLast();
+  PortraitFeedItem? pop() {
+    if (_history.isEmpty) {
+      return null;
+    }
+    _dropPrefetch();
+    return _history.removeLast();
+  }
 
   void markCursor(PortraitFeedItem item) => _cursor = item.bvid;
 
   void clear() {
     _queue.clear();
     _history.clear();
+    _rejected.clear();
     _cursor = null;
+    _dropPrefetch();
   }
 
+  /// 关闭「竖屏即刷」或换页面时彻底清空，连首页推荐的分页游标一起重置，
+  /// 下次打开从头开始取推荐
+  void reset() {
+    clear();
+    _homeIdx = 0;
+    _lastRefreshAt = null;
+    _refreshing = false;
+  }
 
   Future<bool> _refreshFeed(String currentBvid) async {
     if (_refreshing) return false;
@@ -108,9 +130,63 @@ class PortraitFeedService {
     }
   }
 
+  /// 后台预取 [currentBvid] 之后的视频：上滑时直接命中缓存，不必等网络和
+  /// 竖屏探测。失败静默，真正切换时还会再试一次。
+  void preloadNext({required String currentBvid}) {
+    if (currentBvid.isEmpty) return;
+    if (_prefetchFor == currentBvid && _prefetchFuture != null) return;
+    if (_prefetchedFor == currentBvid && _prefetched != null) return;
+    _prefetchFor = currentBvid;
+    late final Future<void> future;
+    future = _findNext(currentBvid)
+        .then((item) {
+          if (item != null && _prefetchFor == currentBvid) {
+            _prefetched = item;
+            _prefetchedFor = currentBvid;
+          }
+        })
+        .catchError((_) {})
+        .whenComplete(() {
+          if (identical(_prefetchFuture, future)) {
+            _prefetchFuture = null;
+          }
+        });
+    _prefetchFuture = future;
+  }
 
+  PortraitFeedItem? _takePrefetched(String currentBvid) {
+    final item = _prefetched;
+    final forBvid = _prefetchedFor;
+    _prefetched = null;
+    _prefetchedFor = null;
+    if (item == null || forBvid != currentBvid) {
+      return null;
+    }
+    if (item.bvid == currentBvid || _history.any((e) => e.bvid == item.bvid)) {
+      return null;
+    }
+    return item;
+  }
+
+  void _dropPrefetch() {
+    _prefetched = null;
+    _prefetchedFor = null;
+    _prefetchFor = null;
+    _prefetchFuture = null;
+  }
 
   Future<PortraitFeedItem?> next({required String currentBvid}) async {
+    final pending = _prefetchFuture;
+    if (pending != null && _prefetchFor == currentBvid) {
+      await pending;
+    }
+    if (_takePrefetched(currentBvid) case final cached?) {
+      return cached;
+    }
+    return _findNext(currentBvid);
+  }
+
+  Future<PortraitFeedItem?> _findNext(String currentBvid) async {
     bool refreshed = false;
     for (int i = 0; i < _maxProbe; i++) {
       var item = _take(currentBvid);
@@ -126,7 +202,7 @@ class PortraitFeedService {
           refreshed = true;
           continue;
         }
-          return null;
+        return null;
       }
       if (await _ensureVertical(item)) {
         return item;
@@ -210,7 +286,7 @@ class PortraitFeedService {
       final res = await VideoHttp.relatedVideoList(bvid: bvid);
       if (res case Success(:final response)) {
         for (final HotVideoItemModel e
-        in response ?? const <HotVideoItemModel>[]) {
+            in response ?? const <HotVideoItemModel>[]) {
           if (e.isLive == true || e.isPugv == true) {
             continue;
           }

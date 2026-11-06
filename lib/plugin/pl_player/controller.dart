@@ -18,8 +18,6 @@ import 'package:PiliPlus/models/user/danmaku_rule.dart';
 import 'package:PiliPlus/models/video/play/url.dart';
 import 'package:PiliPlus/models_new/video/video_shot/data.dart';
 import 'package:PiliPlus/pages/danmaku/danmaku_model.dart';
-import 'package:PiliPlus/pages/setting/models/play_settings.dart'
-    show kMaxVolume;
 import 'package:PiliPlus/pages/sponsor_block/block_mixin.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_status.dart';
@@ -285,6 +283,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       (Platform.isAndroid && AndroidHelper.isPipMode) ||
       (PlatformUtils.isDesktop && isDesktopPip);
   late bool isDesktopPip = false;
+  late nativeapi.Size _lastMinSize;
   late nativeapi.Rectangle _lastWindowBounds;
   static nativeapi.Rectangle? _lastPipBounds;
 
@@ -358,7 +357,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     isDesktopPip = false;
     if (showWindowTitleBar) window.titleBarStyle = .normal;
     window
-      ..minimumSize = DeviceUtils.desktopMinSize
+      ..minimumSize = _lastMinSize
       ..bounds = _lastWindowBounds
       ..aspectRatio = 0;
     setAlwaysOnTop(false, window: window);
@@ -372,6 +371,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
     isDesktopPip = true;
 
+    _lastMinSize = window.minimumSize;
     _lastWindowBounds = window.bounds;
 
     if (showWindowTitleBar) window.titleBarStyle = .hidden;
@@ -2167,14 +2167,6 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         'log-file': '/sdcard/Android/data/com.example.pilinara/files/mpv.log',
         'msg-level': 'all=v',
       },
-      'volume':
-          (PlatformUtils.isMobile
-                  ? (Pref.enableAppVolume
-                        ? volume.value * 100
-                        : Pref.playerVolume)
-                  : volume.value * 100)
-              .toString(),
-      'volume-max': kMaxVolume.toString(),
     };
     final autosync = Pref.autosync;
     if (autosync != '0') {
@@ -2239,6 +2231,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
     // HDR / 杜比视界：必须在视频输出初始化前写入，vo 创建时才会读取这些参数
     _applyHdrProperties(player, hdrSurface: nativeSurfaceMode.value);
+    // >100% 的音量走 af 增益+限幅，避免直接放大 mpv volume 导致削波
+    await setVolumeCapped(
+      player,
+      PlatformUtils.isMobile ? Pref.playerVolume / 100 : volume.value,
+    );
 
     assert(_videoController == null);
 
@@ -2916,7 +2913,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       this.volume.value = volume;
       try {
         if (PlatformUtils.isDesktop) {
-          await _videoPlayerController!.setVolume(volume * 100);
+          await setVolumeCapped(_videoPlayerController, volume);
         } else {
           // 移动平台：根据设置选择音量控制方式
           if (Pref.enableAppVolume) {

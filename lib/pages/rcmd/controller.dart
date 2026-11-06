@@ -3,15 +3,22 @@ import 'dart:math';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/http/video.dart';
 import 'package:PiliPlus/models/common/rcmd_mode.dart';
+import 'package:PiliPlus/models/common/rcmd_source.dart';
 import 'package:PiliPlus/models/model_rec_video_item.dart';
+import 'package:PiliPlus/pages/common/common_controller.dart'
+    show RefreshImplMixin;
 import 'package:PiliPlus/pages/common/common_list_controller.dart';
 import 'package:PiliPlus/services/logger.dart';
+import 'package:PiliPlus/utils/extension/scroll_controller_ext.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
 
-class RcmdController extends CommonListController {
+class RcmdController extends CommonListController with RefreshImplMixin {
   late bool enableSaveLastData = Pref.enableSaveLastData;
   final RcmdMode rcmdMode = Pref.rcmdMode;
   bool get appRcmd => rcmdMode == RcmdMode.app;
+
+  /// 首页推荐来源，首次读取时从旧 key appRcmd 迁移
+  RcmdSource rcmdSource = Pref.rcmdSource;
 
   int? lastRefreshAt;
   late bool savedRcmdTip = Pref.savedRcmdTip;
@@ -36,9 +43,16 @@ class RcmdController extends CommonListController {
     if (rcmdMode != RcmdMode.merged) {
       // 单源模式
       _isFirstPage = (page == 0);
-      return appRcmd
-          ? VideoHttp.rcmdVideoListApp(freshIdx: page)
-          : VideoHttp.rcmdVideoList(freshIdx: page, ps: 20);
+      return switch (rcmdSource) {
+        RcmdSource.app => VideoHttp.rcmdVideoListApp(freshIdx: page),
+        // 桌面端与官方 Windows 客户端一致，每次请求 30 条
+        RcmdSource.desktop => VideoHttp.rcmdVideoList(
+          freshIdx: page,
+          ps: 30,
+          desktop: true,
+        ),
+        RcmdSource.web => VideoHttp.rcmdVideoList(freshIdx: page, ps: 20),
+      };
     }
 
     // 合并模式：并行请求
@@ -120,5 +134,10 @@ class RcmdController extends CommonListController {
     _appPage = 0; // 重置 App 端页码
     isEnd = false;
     return queryData();
+  }
+
+  void toTopAndRefresh() {
+    scrollController.jumpToTop();
+    showRefresh();
   }
 }

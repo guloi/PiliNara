@@ -107,7 +107,7 @@ List<SettingsModel> get extraSettings => [
     const SplitModel(
       normalModel: NormalModel.split(
         title: '竖屏即刷',
-        subtitle: '允许竖屏视频上下滑动刷视频',
+        subtitle: '竖屏视频全屏播放时，上滑刷下一个，下滑回上一个',
         leading: Icon(Icons.height),
       ),
       switchModel: SwitchModel.split(

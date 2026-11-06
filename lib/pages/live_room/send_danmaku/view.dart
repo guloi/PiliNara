@@ -177,7 +177,6 @@ class _ReplyPageState extends CommonRichTextPubPageState<LiveSendDmPanel> {
               ),
               style: theme.textTheme.bodyLarge,
             ),
-            style: theme.textTheme.bodyLarge,
           ),
           Obx(
             () => enablePublish.value

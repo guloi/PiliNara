@@ -379,7 +379,7 @@ class MainController extends GetxController
     if (navigationBars[selectedIndex.value] == NavigationBarType.home &&
         homeController.tabs[homeController.tabController.index] ==
             HomeTabType.rcmd) {
-      homeController.onRefresh();
+      homeController.showRefresh();
       return true;
     }
     return false;

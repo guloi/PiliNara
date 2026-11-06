@@ -148,7 +148,7 @@ target-colorspace-hint=yes
 ### 4.2 gpu-next + Vulkan（实验）
 
 需要带 Vulkan 的 libmpv 构建（本仓库 fork：
-`https://github.com/Gahiao/libmpv-android-video-build`，构建时打开 `MPV_VULKAN` /
+`https://github.com/guloi/libmpv-android-video-build`，构建时打开 `MPV_VULKAN` /
 `LIBPLACEBO_VULKAN`，并且 **libplacebo 必须带 SPIR-V 编译器 shaderc**）。
 `ra_ctx_vulkan_android`（`gpu-context=androidvk`）是 fork 新增的 Android Vulkan 上下文。
 
