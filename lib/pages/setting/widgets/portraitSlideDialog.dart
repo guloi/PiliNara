@@ -38,6 +38,16 @@ Future<void> portraitSlideDialog(BuildContext context) async {
                   contentPadding: const EdgeInsets.symmetric(horizontal: 24),
                   onChanged: (_) => setState(() {}),
                 ),
+                SetSwitchItem(
+                  title: '随机视频',
+                  subtitle: Pref.portraitRandom
+                      ? '当前：从推荐池里随机挑一个竖屏视频'
+                      : '当前：按推荐顺序依次刷',
+                  setKey: SettingBoxKey.portraitRandom,
+                  defaultVal: false,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                  onChanged: (_) => setState(() {}),
+                ),
                 const SetSwitchItem(
                   title: '刷新推荐',
                   subtitle: '没有更多竖屏视频时，重新取一次推荐',
@@ -55,6 +65,7 @@ Future<void> portraitSlideDialog(BuildContext context) async {
             onPressed: () async {
               await GStorage.setting.put(SettingBoxKey.portraitRC, false);
               await GStorage.setting.put(SettingBoxKey.portraitNewv, false);
+              await GStorage.setting.put(SettingBoxKey.portraitRandom, false);
 
               setState(() => subtreeKey = UniqueKey());
             },

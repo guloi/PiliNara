@@ -48,6 +48,18 @@ Flutter 的 `Texture` 固定是 **RGBA8888**，HDR 元数据在这一步必然�
 > 拿不到解码后的帧，出现偏色或色调映射失效，因此固定使用 `mediacodec-copy`。
 > 需要省电可选回 `mediacodec_embed` 后端。
 
+### 2.1 默认 gpu-next
+
+音视频设置 →「HDR / 杜比视界」的下一行就是「默认 gpu-next」，进入方式相同：
+左侧是开关（立即生效），右侧箭头进入同名二级页面调整子选项。
+
+| 设置项 | 存储键 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| 默认 gpu-next | `defaultGpuNext` | 关 | 所有片源默认用 gpu-next（libplacebo）出画：SDR 走纹理，HDR / 杜比视界走原生 SurfaceView。开启后「HDR 渲染后端」对 HDR / 杜比视界片源失效，改由下面的子选项决定 |
+| 渲染 API | `gpuNextApi` | `auto` | `auto`：HDR / 杜比视界走 Vulkan、SDR 走 OpenGL；`vulkan`：SDR 纹理也走 Vulkan（初始化失败自动回退 OpenGL）；`opengl`：全部 OpenGL，HDR 会被映射成 SDR，兼容性最好 |
+| HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时该项不生效 |
+| 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | profile 5 的 IPTPQc2 依赖 RPU 元数据，`mediacodec-copy` 拿不到（会整体偏色），因此这类片源强制软解（`hwdec=no`） |
+
 ## 三、原生出画层怎么工作
 
 `android/app/src/main/kotlin/com/example/pilinara/VideoSurfaceHost.kt`：
@@ -200,6 +212,13 @@ HDR 交换链复位成 SDR）。
 色彩空间（`ra_ctx_vulkan_android` 的 `target_csp` 返回空）时，会按 HDR10（PQ/BT.2020）
 构造 hint，再通过 `VK_EXT_swapchain_colorspace` 协商交换链。
 
+`gpu-next` + Vulkan 在「默认 gpu-next」打开、渲染 API 为 `auto` / `vulkan` 时生效。
+HDR / 杜比视界片源会额外写一个 fork 新增的 mpv 选项 `options/android-vulkan-hdr=yes`（见 4.4）：
+fork 的 `androidvk` 上下文据此把 `ANativeWindow` 切成 BT.2020/PQ dataspace + 10bit 格式，
+并把 `preferred_csp` 报成 HDR10，`vo_gpu_next` 才会把 HDR 传给
+`pl_swapchain_colorspace_hint`，显示端（SurfaceFlinger / 面板）才会真正进入 HDR。
+旧 libmpv 没有这个选项时只会打一条未知选项 warning，行为与以前一致：画面正常，但面板不激发。
+
 **自动回退**：播放开始 2.5 秒后读取 `vo-configured`；若仍为 `no`，说明当前
 libmpv 的 Vulkan VO 初始化失败（最常见原因就是缺 shaderc），应用会设置
 `_vulkanVoUnavailable` 并自动回退：HDR 片源改用 `mediacodec_embed` 直通，
@@ -214,6 +233,37 @@ libmpv 的 Vulkan VO 初始化失败（最常见原因就是缺 shaderc），应
 （`fbo-format` 是 OpenGL 选项，Vulkan 路径不能写），同时显式写
 `target-colorspace-hint=no`，让 libplacebo 正常 tone map 回 SDR。Android EGL 没有
 HDR 交换链扩展，这条路径通常只输出 SDR，主要用于兼容排查。
+
+### 4.4 fork 里的 Android Vulkan HDR 输出（android-vulkan-hdr）
+
+mpv 本体按上游 `v0.41.0` 拉取，改动以 patch 形式放在 fork：
+
+`third_party/libmpv-android-video-build/buildscripts/patches/mpv/android-vulkan-hdr.patch`
+
+`buildscripts/patch.sh` 在每次 bundle 前把 `deps/<dep>` `git reset --hard` 回上游版本，再依次
+`git apply` 所有 `patches/<dep>/*.patch`（`deps/` 是构建时下载目录，被 `.gitignore` 忽略），
+所以新选项和 `context_android.c` 的改动都应该写成 patch，而不是直接改 `deps/mpv`。
+
+patch 内容：
+
+- `options/options.h` / `options/options.c`：新增 vo 选项 `--android-vulkan-hdr`（默认 `no`）。
+- `video/out/vulkan/context_android.c`：
+  - `android_init` 在 `vkCreateAndroidSurfaceKHR` 之前，HDR 时先
+    `ANativeWindow_setBuffersGeometry(..., AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM)` +
+    `ANativeWindow_setBuffersDataSpace(ADATASPACE_BT2020_PQ)`，让 WSI 由窗口 dataspace
+    推导出 HDR 的 `VkColorSpaceKHR`；
+  - 给 `ra_ctx_params` 填 `preferred_csp`（HDR10）与 `color_depth`（10），
+    `vo_gpu_next` 的 `target_csp` 才会是 HDR10；
+  - `android_reconfig`：`ANativeWindow_setBuffersGeometry` 会复位 dataspace，HDR 分支每次
+    resize 后重新设置；`ANativeWindow_setBuffersDataSpace` 是 API 28 才有的符号，而 fork 按
+    `apilvl=24` 编译，所以用 `dlsym(RTLD_DEFAULT, ...)` 解析，运行时缺失就只设 10bit 格式。
+
+只写 mpv 的 `target-colorspace-hint` / `target-prim` / `target-trc` 不会改变交换链的实际
+编码格式，libplacebo 仍按 `VK_COLOR_SPACE_SRGB` 输出 SDR；上面的 dataspace + `preferred_csp`
+才是「面板激发」的必要条件。
+
+App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` 之后才会带上这个 patch
+（下载流程见 4.2）。
 
 ## 五、片源获取
 

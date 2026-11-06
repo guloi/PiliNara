@@ -11,6 +11,7 @@ import 'package:PiliPlus/pages/setting/widgets/ordered_multi_select_dialog.dart'
 import 'package:PiliPlus/pages/setting/widgets/select_dialog.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/audio_output_type.dart';
+import 'package:PiliPlus/plugin/pl_player/models/hdr_config.dart';
 import 'package:PiliPlus/plugin/pl_player/models/hwdec_type.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/utils/filtering_text.dart';
@@ -43,11 +44,21 @@ List<SettingsModel> get videoSettings => [
     SplitModel(
       normalModel: NormalModel(
         title: '默认 gpu-next',
-        getSubtitle: () => Pref.defaultGpuNext
-            ? (Pref.gpuNextHdrMediaCodec
-                  ? '已开启：SDR 走 gpu-next，HDR / 杜比视界切回 MediaCodec'
-                  : '已开启：SDR 与 HDR / 杜比视界都走 gpu-next')
-            : '关闭：使用 MediaCodec / gpu 出画',
+        getSubtitle: () {
+          if (!Pref.defaultGpuNext) {
+            return '关闭：使用 MediaCodec / gpu 出画';
+          }
+          final api = GpuNextApi.fromValue(Pref.gpuNextApi);
+          if (api == GpuNextApi.opengl) {
+            return '已开启（渲染 API：OpenGL）：SDR 与 HDR / 杜比视界都走 '
+                'gpu-next OpenGL';
+          }
+          return Pref.gpuNextHdrMediaCodec
+              ? '已开启（渲染 API：${api.label}）：SDR 走 gpu-next，'
+                    'HDR / 杜比视界切回 MediaCodec'
+              : '已开启（渲染 API：${api.label}）：SDR 与 HDR / 杜比视界都走 '
+                    'gpu-next';
+        },
         leading: const Icon(Icons.auto_awesome_outlined),
       ),
       switchModel: SwitchModel.split(

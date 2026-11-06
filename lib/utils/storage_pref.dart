@@ -1386,6 +1386,14 @@ abstract final class Pref {
   static bool get gpuNextHdrMediaCodec =>
       _setting.get(SettingBoxKey.gpuNextHdrMediaCodec, defaultValue: true);
 
+  /// 「默认 gpu-next」使用的渲染 API（GpuNextApi.value）。
+  static String get gpuNextApi =>
+      _setting.get(SettingBoxKey.gpuNextApi, defaultValue: 'auto');
+
+  /// gpu-next 播放杜比视界 profile 5 时改用软解，保留 RPU 元数据。
+  static bool get gpuNextDoviSoft =>
+      _setting.get(SettingBoxKey.gpuNextDoviSoft, defaultValue: true);
+
   static Set<int> get danmakuBlockType => Set<int>.from(
     _setting.get(SettingBoxKey.danmakuBlockType, defaultValue: const <int>{}),
   );
@@ -1880,6 +1888,13 @@ abstract final class Pref {
 
   static set portraitNewv(bool value) =>
       _setting.put(SettingBoxKey.portraitNewv, value);
+
+  static bool get portraitRandom =>
+      _setting.get(SettingBoxKey.portraitRandom,
+          defaultValue:false);
+
+  static set portraitRandom(bool value) =>
+      _setting.put(SettingBoxKey.portraitRandom, value);
 
 
   static String get bvJumpToastText =>

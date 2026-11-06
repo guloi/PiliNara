@@ -61,6 +61,18 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
     _scheduleSync();
   }
 
+  /// 原生 SurfaceView 是否申请 10bit 缓冲格式。
+  ///
+  /// 「默认 gpu-next」开启时由渲染 API 决定：HDR 交给 MediaCodec 直通或走
+  /// Vulkan 都需要 10bit，只有 OpenGL 渲染 API 仍然只输出 SDR。
+  bool get _wantTenBit {
+    if (Pref.defaultGpuNext) {
+      if (Pref.gpuNextHdrMediaCodec) return true;
+      return Pref.gpuNextApi != GpuNextApi.opengl;
+    }
+    return HdrBackend.fromValue(Pref.hdrBackend) != HdrBackend.mediacodecEmbed;
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed || !_created) return;
@@ -76,8 +88,7 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
         y: rect.$2,
         width: rect.$3,
         height: rect.$4,
-        tenBit:
-            HdrBackend.fromValue(Pref.hdrBackend) != HdrBackend.mediacodecEmbed,
+        tenBit: _wantTenBit,
       ),
     );
   }
@@ -206,9 +217,7 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
           y: top,
           width: width,
           height: height,
-          tenBit:
-              HdrBackend.fromValue(Pref.hdrBackend) !=
-              HdrBackend.mediacodecEmbed,
+          tenBit: _wantTenBit,
         ),
       );
       return;

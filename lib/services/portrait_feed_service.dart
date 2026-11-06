@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/http/search.dart';
 import 'package:PiliPlus/http/video.dart';
@@ -49,6 +51,9 @@ class PortraitFeedService {
   DateTime? _lastRefreshAt;
   static const Duration _refreshCooldown = Duration(seconds: 5);
   final Set<String> _rejected = <String>{};
+
+  /// 开启「随机视频」后从候选池里随机取，而不是按推荐顺序依次取
+  final Random _random = Random();
 
   String? get cursor => _cursor;
 
@@ -188,10 +193,20 @@ class PortraitFeedService {
 
   Future<PortraitFeedItem?> _findNext(String currentBvid) async {
     bool refreshed = false;
+    // 随机模式下相关推荐很快就会刷完，补一次首页推荐，免得刷几下就断流
+    bool homeFilled = false;
     for (int i = 0; i < _maxProbe; i++) {
       var item = _take(currentBvid);
       if (item == null) {
         await _fill(bvid: currentBvid);
+        item = _take(currentBvid);
+      }
+      if (item == null &&
+          Pref.portraitRandom &&
+          !Pref.portraitRC &&
+          !homeFilled) {
+        homeFilled = true;
+        await _fillHomeRcmd();
         item = _take(currentBvid);
       }
       if (item == null) {
@@ -215,14 +230,19 @@ class PortraitFeedService {
   }
 
   PortraitFeedItem? _take(String currentBvid) {
-    while (_queue.isNotEmpty) {
-      final item = _queue.removeAt(0);
-      if (item.bvid == currentBvid) continue;
-      if (_history.any((e) => e.bvid == item.bvid)) continue;
-      if (_rejected.contains(item.bvid)) continue;
-      return item;
+    // 先剪掉当前视频、已经刷过的和探测出不是竖屏的条目，剩下的才是候选
+    _queue.removeWhere(
+      (e) =>
+          e.bvid == currentBvid ||
+          _history.any((h) => h.bvid == e.bvid) ||
+          _rejected.contains(e.bvid),
+    );
+    if (_queue.isEmpty) {
+      return null;
     }
-    return null;
+    // 随机视频：候选池里随机挑一个，避免每次都是同一批推荐按同样顺序刷
+    final int index = Pref.portraitRandom ? _random.nextInt(_queue.length) : 0;
+    return _queue.removeAt(index);
   }
 
   Future<bool> _ensureVertical(PortraitFeedItem item) async {

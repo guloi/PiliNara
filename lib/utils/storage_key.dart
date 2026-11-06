@@ -28,6 +28,8 @@ abstract final class SettingBoxKey {
       doviAudioOffset = 'doviAudioOffset',
       defaultGpuNext = 'defaultGpuNext',
       gpuNextHdrMediaCodec = 'gpuNextHdrMediaCodec',
+      gpuNextApi = 'gpuNextApi',
+      gpuNextDoviSoft = 'gpuNextDoviSoft',
       audioOutput = 'audioOutput',
       bufferSize = 'bufferSize',
       bufferSec = 'bufferSec',
@@ -370,7 +372,8 @@ abstract final class SettingBoxKey {
       shouldJumpEveryTime = 'shouldJumpEveryTime';
   static const String portraitSlideVideo = 'portraitSlideVideo',
       portraitRC = 'portraitRC',
-      portraitNewv = 'portraitNewv';
+      portraitNewv = 'portraitNewv',
+      portraitRandom = 'portraitRandom';
 }
 
 abstract final class LocalCacheKey {

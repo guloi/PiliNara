@@ -93,7 +93,9 @@ List<SettingsModel> get hdrSettings => [
     getSubtitle: () {
       final backend = HdrBackend.fromValue(Pref.hdrBackend);
       if (Pref.defaultGpuNext) {
-        return '当前：${backend.label}。已开启「默认 gpu-next」：'
+        final api = GpuNextApi.fromValue(Pref.gpuNextApi);
+        return '当前：${backend.label}。已开启「默认 gpu-next」（渲染 API：'
+            '${api.label}）：'
             '${Pref.gpuNextHdrMediaCodec ? 'HDR / 杜比视界会切回 MediaCodec 直通，' : ''}'
             '此项只在关闭「默认 gpu-next」后生效。';
       }

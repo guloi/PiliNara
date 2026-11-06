@@ -126,6 +126,33 @@ enum HdrBackend {
       values.firstWhere((e) => e.value == value, orElse: () => gpuNext);
 }
 
+/// 「默认 gpu-next」使用的渲染 API。
+///
+/// * [auto]：HDR / 杜比视界走 Vulkan 交换链，能真正点亮 HDR 面板；SDR 走纹理
+///   gpu-next OpenGL；
+/// * [vulkan]：SDR 也走 Vulkan 纹理，统一由 Vulkan 交换链出画；
+/// * [opengl]：全部走 OpenGL，兼容性最好，但 Android 的 EGL 路径没有 HDR
+///   交换链，HDR 片源只能由 libplacebo 映射成 SDR。
+enum GpuNextApi {
+  auto('auto', '自动（推荐）', 'HDR / 杜比视界走 Vulkan，SDR 走 gpu-next OpenGL'),
+  vulkan('vulkan', 'Vulkan', '全部走 Vulkan 交换链，HDR 激发最完整，兼容性依赖驱动'),
+  opengl('opengl', 'OpenGL', '全部走 gpu-next OpenGL，兼容性最好，HDR 会被映射成 SDR');
+
+  const GpuNextApi(this.value, this.label, this.desc);
+
+  /// 持久化到设置中的值。
+  final String value;
+
+  /// 设置页展示的名称。
+  final String label;
+
+  /// 设置页展示的说明。
+  final String desc;
+
+  static GpuNextApi fromValue(String? value) =>
+      values.firstWhere((e) => e.value == value, orElse: () => auto);
+}
+
 /// mpv `--tone-mapping` 可选的色调映射算法。
 ///
 /// 取值参考 mpv 手册，未知取值会被 libmpv 忽略并使用默认算法。

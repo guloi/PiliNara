@@ -655,12 +655,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// HDR 设置页里手动选择的后端。
   HdrBackend get _configuredBackend => HdrBackend.fromValue(Pref.hdrBackend);
 
+  /// 「默认 gpu-next」使用的渲染 API：自动 / Vulkan / OpenGL。
+  GpuNextApi get _gpuNextApi => GpuNextApi.fromValue(Pref.gpuNextApi);
+
   /// 是否希望片源走 gpu-next（Vulkan）。
   ///
   /// 开启「默认 gpu-next」后，HDR / 杜比视界是否仍交给 MediaCodec 由子开关
   /// [Pref.gpuNextHdrMediaCodec] 决定；未开启时沿用 HDR 设置页的选择。
   bool get _vulkanNextWanted => _defaultGpuNext
-      ? !Pref.gpuNextHdrMediaCodec
+      ? _gpuNextApi != GpuNextApi.opengl
       : _configuredBackend == HdrBackend.gpuNext;
 
   /// 当前片源是否需要「视频在 Flutter 之下」的 SurfaceView 出画。
@@ -674,6 +677,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// HDR / 杜比视界片源实际使用的出画后端。
   HdrBackend get _hdrOutputBackend {
+    // 「默认 gpu-next」选了 OpenGL：HDR / 杜比视界也留在 gpu-next OpenGL。
+    // Android 的 EGL 路径没有 HDR 交换链，画面会被 libplacebo 映射成 SDR，
+    // 但兼容性最好，适合 Vulkan 驱动有问题的设备。
+    if (_defaultGpuNext && _gpuNextApi == GpuNextApi.opengl) {
+      return HdrBackend.gpuNextGl;
+    }
     // 「默认 gpu-next」开启且要求 HDR / 杜比视界切回 MediaCodec：
     // 由系统解码器直接送显，是 Android 上点亮 HDR 面板最稳的路径。
     if (_defaultGpuNext && Pref.gpuNextHdrMediaCodec && Pref.enableHA) {
@@ -709,6 +718,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 一次后本进程内退回 gpu，避免用户每次都要手动关掉「默认 gpu-next」。
   static bool _gpuNextTextureUnavailable = false;
 
+  /// 纹理出画路径上 gpu-next Vulkan 是否已确认不可用。
+  ///
+  /// 纹理没有原生 Surface，Vulkan 交换链创建失败时整块纹理变黑。检测到
+  /// 一次后本进程内改用同一 vo 的 OpenGL 上下文，避免一直黑屏。
+  static bool _gpuNextVulkanTextureUnavailable = false;
+
   bool get _shouldProbeVulkan => !_vulkanVoUnavailable && _vulkanNextWanted;
 
   /// Vulkan 不可用时，HDR 片源是否改走 MediaCodec 直通。
@@ -725,12 +740,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// 纹理出画时使用的后端（SDR 片源默认走这里）。
   ///
-  /// 开启「默认 gpu-next」后 SDR 也交给 libplacebo：纹理路径只有 OpenGL
-  /// 上下文能直接输出，因此固定使用 gpu-next + OpenGL。
-  HdrBackend get _textureBackend =>
-      _defaultGpuNext && !_gpuNextTextureUnavailable
-      ? HdrBackend.gpuNextGl
-      : HdrBackend.gpu;
+  /// 开启「默认 gpu-next」后 SDR 也交给 libplacebo：默认走 gpu-next OpenGL
+  /// 纹理；渲染 API 选 Vulkan 时改用 Vulkan 纹理，失败后回退 OpenGL。
+  HdrBackend get _textureBackend {
+    if (!_defaultGpuNext || _gpuNextTextureUnavailable) return HdrBackend.gpu;
+    if (_gpuNextApi == GpuNextApi.vulkan && !_gpuNextVulkanTextureUnavailable) {
+      return HdrBackend.gpuNext;
+    }
+    return HdrBackend.gpuNextGl;
+  }
 
   /// 本次播放实际使用的后端（Vulkan 失败后自动回退）。
   HdrBackend get _renderBackend =>
@@ -740,6 +758,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   static void resetVulkanFallback() {
     _vulkanVoUnavailable = false;
     _gpuNextTextureUnavailable = false;
+    _gpuNextVulkanTextureUnavailable = false;
   }
 
   /// 原生 SurfaceView 出画开关。Rx 以便播放页在出画方式变化时立即重建视频控件。
@@ -771,6 +790,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 也无法还原），半屏/全屏切换后更明显。因此只要后端是 gpu-next
     // （SDR 与 HDR 都一样）就强制拷贝解码，不再跟随「直通解码」设置。
     if (backend.isGpuNext) {
+      // 杜比视界 profile 5 的 IPTPQc2 只能靠 RPU 元数据还原。Android 的
+      // mediacodec-copy 拿不到解码器解析出的 DoVi side data，libplacebo
+      // 只能按 BT.2020/PQ 处理，画面整体偏色；这类片源改走软解保留 RPU。
+      if (isDolbyVisionProfile5 && Pref.gpuNextDoviSoft) {
+        return 'no';
+      }
       return config.copyHwdec;
     }
     if (!config.enabled) return Pref.hardwareDecoding;
@@ -1268,7 +1293,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           '后端: ${_renderBackend.label} (${_renderBackend.gpuApi ?? '-'})'
           '${_renderBackend != HdrBackend.fromValue(Pref.hdrBackend) ? '，已自动回退（原 ${HdrBackend.fromValue(Pref.hdrBackend).label}）' : ''}',
       'Vulkan 自动回退: ${_vulkanVoUnavailable ? '已触发（当前 libmpv 缺少 SPIR-V 编译器）' : '未触发'}',
-      '默认 gpu-next: ${_defaultGpuNext ? '开（HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}）' : '关'}',
+      '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 && Pref.gpuNextDoviSoft ? '，profile 5 软解' : ''}）' : '关'}',
+      if (native && _renderBackend.gpuApi == 'vulkan')
+        'Vulkan HDR 窗口: ${read('options/android-vulkan-hdr')}',
       '片源判定: ${isHdrSource ? (isDolbyVisionSource ? 'HDR / 杜比视界' : (isHdrVividSource ? 'HDR Vivid' : 'HDR')) : 'SDR'}',
       if (sourceCodecs != null) '片源 codecs: $sourceCodecs',
     ].join('\n');
@@ -1336,6 +1363,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// Vulkan VO 可用性检查：创建失败时自动回退到 gpu-next OpenGL。
   Timer? _vulkanCheckTimer;
+  Timer? _vulkanTextureCheckTimer;
 
   /// 最近一次 SurfaceView 画面采样结果（平均亮度；0 表示全黑）。
   int? _lastProbeMean;
@@ -1482,6 +1510,44 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     debugPrint('[HDR] gpu-next texture unavailable ($reason), fallback to gpu');
     _gpuNextTextureUnavailable = true;
     SmartDialog.showToast('gpu-next 输出不可用，已回退到 gpu（重新加载视频后生效）');
+  }
+
+  /// 纹理出画 + Vulkan 时检查 VO 是否真的建起来了。
+  ///
+  /// 纹理路径没有原生 Surface，Vulkan 初始化失败只会得到一张黑图，
+  /// 因此开始播放后检查一次 `vo-configured`，失败则退回 gpu-next OpenGL。
+  void _scheduleTextureVulkanVoCheck() {
+    _vulkanTextureCheckTimer?.cancel();
+    _vulkanTextureCheckTimer = null;
+    if (nativeSurfaceMode.value || _useMedia3Dovi) return;
+    if (_textureBackend != HdrBackend.gpuNext) return;
+    _vulkanTextureCheckTimer = Timer(const Duration(milliseconds: 2500), () {
+      _vulkanTextureCheckTimer = null;
+      final player = _videoPlayerController;
+      if (player == null) return;
+      if (nativeSurfaceMode.value || _useMedia3Dovi) return;
+      if (_textureBackend != HdrBackend.gpuNext) return;
+      if (!player.state.playing) return;
+      var configured = '';
+      try {
+        configured = player.getProperty('vo-configured');
+      } catch (_) {}
+      if (configured == 'yes') return;
+      _fallbackFromGpuNextVulkanTexture('vo-configured="${configured}"');
+    });
+  }
+
+  /// 纹理出画路径上 gpu-next Vulkan 失败时退回 OpenGL 上下文。
+  ///
+  /// 纹理无法像原生 Surface 那样立刻重建，这里只记录回退标记并提示，
+  /// 下一次加载视频时 [VideoController] 会按 OpenGL 重建。
+  void _fallbackFromGpuNextVulkanTexture(String reason) {
+    if (_gpuNextVulkanTextureUnavailable) return;
+    debugPrint(
+      '[HDR] gpu-next vulkan texture unavailable ($reason), fallback to OpenGL',
+    );
+    _gpuNextVulkanTextureUnavailable = true;
+    SmartDialog.showToast('Vulkan 纹理输出不可用，已回退到 gpu-next OpenGL（重新加载视频后生效）');
   }
 
   /// 播放开始后采样 SurfaceView 画面。
@@ -1781,6 +1847,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _nativeProbeTimer = null;
     _vulkanCheckTimer?.cancel();
     _vulkanCheckTimer = null;
+    _vulkanTextureCheckTimer?.cancel();
+    _vulkanTextureCheckTimer = null;
     if (!keepSurface) {
       _nativeOwner = null;
       _nativeWid = null;
@@ -1842,6 +1910,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           properties['gpu-api'] = backend.gpuApi!;
           properties['gpu-context'] = backend.gpuContext!;
         }
+        // 是否让 libmpv 的 Android Vulkan 上下文按 HDR10 输出：fork 里的
+        // androidvk 会据此把 ANativeWindow 切成 BT.2020/PQ + 10bit，并向
+        // libplacebo 声明 preferred_csp，显示端才会真正进入 HDR 模式。
+        properties['options/android-vulkan-hdr'] =
+            hdrSurface &&
+                backend.gpuApi == 'vulkan' &&
+                isHdrSource &&
+                !isHdrVividSource
+            ? 'yes'
+            : 'no';
         if (backend.isGpuNext) {
           // gpu-next（libplacebo）显式声明 gpu-api/gpu-context：Vulkan 走
           // androidvk（fork 里的 ra_ctx_vulkan_android），OpenGL 走 android。
@@ -2218,14 +2296,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           message.contains('gpu context')) {
         _fallbackFromVulkan('mpv error: $event');
       }
-      // 纹理出画时 gpu-next 由 OpenGL 上下文承载，老驱动可能直接创建 VO 失败。
+      // 纹理出画时 gpu-next 的 VO 由 media_kit 创建，老驱动可能直接失败。
       if (!nativeSurfaceMode.value &&
           _appliedTextureBackend?.isGpuNext == true &&
           (message.contains('gpu-next') ||
               message.contains('libplacebo') ||
               message.contains('video output') ||
               message.contains('failed to initialize'))) {
-        _fallbackFromGpuNextTexture('mpv error: $event');
+        if (_appliedTextureBackend == HdrBackend.gpuNext) {
+          _fallbackFromGpuNextVulkanTexture('mpv error: $event');
+        } else {
+          _fallbackFromGpuNextTexture('mpv error: $event');
+        }
       }
     });
 
@@ -2552,6 +2634,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           WakelockPlus.enable();
           _scheduleNativeProbe();
           _scheduleVulkanVoCheck();
+          _scheduleTextureVulkanVoCheck();
 
           if (_isAutoEnterPip &&
               _autoAudioState != AutoAudioOnlyState.autoAudioOnly) {
