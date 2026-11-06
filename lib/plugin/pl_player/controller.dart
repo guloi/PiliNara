@@ -697,15 +697,24 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   HdrBackend get _hdrOutputBackend {
     // 杜比视界 profile 5 例外：色彩是 IPTPQc2，必须由 libplacebo 用 RPU
     // 元数据还原。MediaCodec（直通或拷贝）都拿不到解码器解析出的 DoVi
-    // 元数据，交给它出画会整片偏色（发绿 / 发紫），所以这类片源强制走
-    // gpu-next，不再受「HDR / 杜比视界时切回 MediaCodec」影响。
+    // 元数据，交给它出画会整片偏色（发绿 / 发紫），所以这类片源不跟随
+    // 「HDR / 杜比视界时切回 MediaCodec」；Vulkan 不可用时按设置页的
+    // 「profile 5 回退方式」决定继续软解还是切回 MediaCodec。
     if (_defaultGpuNext && isDolbyVisionProfile5) {
-      if (_gpuNextApi == GpuNextApi.opengl || _vulkanVoBlocked) {
-        // EGL 没有 HDR 交换链 / Vulkan 已判定不可用：至少保证色彩正确
-        // （libplacebo 会先把 IPTPQc2 还原再映射到 SDR）。
-        return HdrBackend.gpuNextGl;
+      // Vulkan 可用时优先它：libplacebo 先把 IPTPQc2 还原成 HDR10，再交给
+      // Vulkan 交换链输出，只有这条路能真正激发杜比视界 / HDR 面板。
+      if (_gpuNextApi != GpuNextApi.opengl && !_vulkanVoBlocked) {
+        return HdrBackend.gpuNext;
       }
-      return HdrBackend.gpuNext;
+      // Vulkan 不可用（驱动不支持 / 已判定失败 / 手动选了 OpenGL）：
+      // 按「profile 5 回退方式」决定交给谁——继续软解保色彩，或切回
+      // MediaCodec 直通换取面板激发（非杜比视界设备会偏色）。
+      if (Pref.enableHA &&
+          GpuNextDoviFallback.fromValue(Pref.gpuNextDoviFallback) ==
+              GpuNextDoviFallback.mediacodec) {
+        return HdrBackend.mediacodecEmbed;
+      }
+      return HdrBackend.gpuNextGl;
     }
     // 「默认 gpu-next」开启且要求 HDR / 杜比视界切回 MediaCodec：
     // 由系统解码器直接送显，是 Android 上点亮 HDR 面板最稳的路径。
@@ -1352,7 +1361,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           '后端: ${_renderBackend.label} (${_renderBackend.gpuApi ?? '-'})'
           '${_renderBackend != HdrBackend.fromValue(Pref.hdrBackend) ? '，已自动回退（原 ${HdrBackend.fromValue(Pref.hdrBackend).label}）' : ''}',
       'Vulkan 自动回退: ${_vulkanVoBlocked ? '已触发（跳过 Vulkan，10 分钟后自动重试）' : (_vulkanVoUnavailable ? '冷却已过，下次播放重试 Vulkan' : '未触发')}',
-      '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 ? '，profile 5 强制 gpu-next${Pref.gpuNextDoviSoft ? ' + 软解' : ''}' : ''}）' : '关'}',
+      '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 ? '，profile 5 ${Pref.gpuNextDoviSoft ? '软解' : '硬解拷贝'}，回退方式「${GpuNextDoviFallback.fromValue(Pref.gpuNextDoviFallback).label}」' : ''}）' : '关'}',
       if (native && _renderBackend.gpuApi == 'vulkan')
         'Vulkan HDR 窗口: ${read('options/android-vulkan-hdr')}'
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
@@ -2705,12 +2714,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
 
     assert(!isLive || seekTo == null);
-    // 按当前片源重新落一次 --hwdec：切换画质/换集时播放器可能复用，
-    // 旧的直通解码会让 HDR 色调映射静默失效。file-local-options 只作用于
-    // 接下来加载的这一个文件，不会污染后续播放。
-    if (_resolveHwdec() case final hwdec?) {
-      player.setProperty('file-local-options/hwdec', hwdec);
-    }
+    // 按当前片源重新落一次 --hwdec：切换画质/换集、小窗与播放页交替时
+    // 播放器会被复用，上一部杜比视界 profile 5 的软解（hwdec=no）会留在
+    // 实例上，导致后面的视频也被软解。
+    // 这里不能用 file-local-options：mpv 规定「没有文件在播放（open 之前
+    // 正是这个状态）时写入 file-local-options 会报错」，设置会静默丢失，
+    // 复用的播放器便继续沿用创建时的全局值。全局选项随时可写，并在下一个
+    // 打开的文件上生效。
+    player.setProperty('hwdec', _resolveHwdec() ?? 'no');
     await player.open(
       Media(
         video,
@@ -4209,6 +4220,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _videoPlayerController = null;
     _activeVideoContextKey = null;
     danmakuMaskPath.dispose();
+    // 离开播放页后清掉 Vulkan / 纹理的自动回退记忆：下次播放重新尝试，
+    // 否则「某部片源回退过一次」会一直留在进程里，退出视频也不会恢复。
+    resetVulkanFallback();
     _instance = null;
     videoPlayerServiceHandler?.clear();
   }

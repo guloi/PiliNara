@@ -30,6 +30,7 @@ abstract final class SettingBoxKey {
       gpuNextHdrMediaCodec = 'gpuNextHdrMediaCodec',
       gpuNextApi = 'gpuNextApi',
       gpuNextDoviSoft = 'gpuNextDoviSoft',
+      gpuNextDoviFallback = 'gpuNextDoviFallback',
       audioOutput = 'audioOutput',
       bufferSize = 'bufferSize',
       bufferSec = 'bufferSec',

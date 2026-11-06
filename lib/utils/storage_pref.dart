@@ -1394,6 +1394,11 @@ abstract final class Pref {
   static bool get gpuNextDoviSoft =>
       _setting.get(SettingBoxKey.gpuNextDoviSoft, defaultValue: true);
 
+  /// 杜比视界 profile 5 无法走 Vulkan 时的回退方式
+  /// （`GpuNextDoviFallback.value`：`soft` / `mediacodec`）。
+  static String get gpuNextDoviFallback =>
+      _setting.get(SettingBoxKey.gpuNextDoviFallback, defaultValue: 'soft');
+
   static Set<int> get danmakuBlockType => Set<int>.from(
     _setting.get(SettingBoxKey.danmakuBlockType, defaultValue: const <int>{}),
   );

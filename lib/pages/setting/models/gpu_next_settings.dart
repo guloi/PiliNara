@@ -68,12 +68,27 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
           },
         ),
       if (Pref.defaultGpuNext)
+        NormalModel(
+          title: '杜比视界 profile 5 回退方式',
+          leading: const Icon(Icons.hdr_plus_outlined),
+          getSubtitle: () {
+            final fallback = GpuNextDoviFallback.fromValue(
+              Pref.gpuNextDoviFallback,
+            );
+            return '当前：${fallback.label}。${fallback.desc}'
+                '（Vulkan 不可用或渲染 API 为 OpenGL 时使用）';
+          },
+          onTap: _showGpuNextDoviFallbackDialog,
+        ),
+      if (Pref.defaultGpuNext)
         SwitchModel(
           title: '杜比视界 profile 5 软解',
           subtitle:
               'profile 5 的色彩要靠杜比视界 RPU 元数据还原，硬解拷贝拿不到这些元数据'
-              '会导致整体偏色；这类片源始终走 gpu-next（不受上一项影响）。'
-              '开启后改用软解渲染（更吃性能），关闭则用硬件拷贝解码。',
+              '会导致整体偏色；这类片源优先走 gpu-next（不受上一项影响），'
+              'Vulkan 不可用时按上一项回退。'
+              '开启后改用软解渲染（更吃性能），关闭则用硬件拷贝解码。'
+              '本项只决定走 gpu-next 时的解码方式，Vulkan 不可用时的回退见上一项。',
           leading: const Icon(Icons.color_lens_outlined),
           setKey: SettingBoxKey.gpuNextDoviSoft,
           defaultVal: true,
@@ -91,6 +106,34 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
         itemBuilder: (context, index) => items[index].widget,
       ),
     );
+  }
+
+  Future<void> _showGpuNextDoviFallbackDialog(
+    BuildContext context,
+    VoidCallback setState,
+  ) async {
+    final res = await showDialog<String>(
+      context: context,
+      builder: (context) => SelectDialog<String>(
+        title: '杜比视界 profile 5 回退方式',
+        value: Pref.gpuNextDoviFallback,
+        values: GpuNextDoviFallback.values
+            .map((e) => (e.value, e.label))
+            .toList(),
+        subtitleBuilder: (context, index) => Text(
+          GpuNextDoviFallback.values[index].desc,
+          style: TextTheme.of(context).labelSmall?.copyWith(
+            color: ColorScheme.of(context).outline,
+          ),
+        ),
+      ),
+    );
+    if (res != null) {
+      await GStorage.setting.put(SettingBoxKey.gpuNextDoviFallback, res);
+      PlPlayerController.resetVulkanFallback();
+      PlPlayerController.instance?.applyHdrOptions();
+      setState();
+    }
   }
 
   Future<void> _showGpuNextApiDialog(

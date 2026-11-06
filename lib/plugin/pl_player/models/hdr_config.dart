@@ -162,6 +162,41 @@ enum GpuNextApi {
       values.firstWhere((e) => e.value == value, orElse: () => auto);
 }
 
+/// 杜比视界 profile 5 无法走 gpu-next Vulkan 时的回退方式。
+///
+/// profile 5 的色彩是 IPTPQc2，只有 libplacebo 从 DoVi RPU 还原才对；
+/// 但 Vulkan 交换链在部分驱动上不可用，渲染 API 也可能被手动选成 OpenGL。
+/// 此时要么继续用 gpu-next 的 OpenGL 上下文软解（色彩正确、面板不激发），
+/// 要么把出画交回 MediaCodec（杜比视界设备能激发，非杜比设备会偏色）。
+enum GpuNextDoviFallback {
+  soft(
+    'soft',
+    '软解（gpu-next OpenGL）',
+    '继续由 libplacebo 软解还原 IPTPQc2：色彩正确，但吃 CPU、耗电；'
+        'EGL 没有 HDR 交换链，面板不会进入杜比视界 / HDR 模式',
+  ),
+  mediacodec(
+    'mediacodec',
+    '切回 MediaCodec',
+    '交给系统解码器直通出画（mediacodec_embed）：杜比视界设备能正常激发，'
+        '不支持杜比视界的设备会因为拿不到 RPU 而偏色',
+  );
+
+  const GpuNextDoviFallback(this.value, this.label, this.desc);
+
+  /// 持久化到设置中的值。
+  final String value;
+
+  /// 设置页展示的名称。
+  final String label;
+
+  /// 设置页展示的说明。
+  final String desc;
+
+  static GpuNextDoviFallback fromValue(String? value) =>
+      values.firstWhere((e) => e.value == value, orElse: () => soft);
+}
+
 /// mpv `--tone-mapping` 可选的色调映射算法。
 ///
 /// 取值参考 mpv 手册，未知取值会被 libmpv 忽略并使用默认算法。

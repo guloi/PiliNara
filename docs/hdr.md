@@ -57,8 +57,9 @@ Flutter 的 `Texture` 固定是 **RGBA8888**，HDR 元数据在这一步必然�
 | --- | --- | --- | --- |
 | 默认 gpu-next | `defaultGpuNext` | 关 | 所有片源默认用 gpu-next（libplacebo）出画：SDR 走纹理，HDR / 杜比视界走原生 SurfaceView。开启后「HDR 渲染后端」对 HDR / 杜比视界片源失效，改由下面的子选项决定 |
 | 渲染 API | `gpuNextApi` | `auto` | `auto`：SDR 走 gpu-next OpenGL，HDR / 杜比视界在关闭下一项后走 Vulkan；`vulkan`：SDR 纹理也走 Vulkan（初始化失败自动回退 OpenGL）；`opengl`：全部 OpenGL，兼容性最好，但 EGL 无法激发 HDR |
-| HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时**建议保持开启**：这是 OpenGL 模式下唯一能真正激发 HDR 的路径；关闭后 HDR 会被映射成 SDR。**杜比视界 profile 5 例外**：它的 IPTPQc2 只能由 libplacebo 还原，MediaCodec 出画会偏色，因此 profile 5 始终走 gpu-next，不受本项影响 |
-| 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | profile 5 的 IPTPQc2 依赖 RPU 元数据，`mediacodec-copy` 拿不到（会整体偏色），因此这类片源强制软解（`hwdec=no`）。profile 5 始终走 gpu-next，所以本项与上一项无关 |
+| HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时**建议保持开启**：这是 OpenGL 模式下唯一能真正激发 HDR 的路径；关闭后 HDR 会被映射成 SDR。**杜比视界 profile 5 例外**：它的 IPTPQc2 只能由 libplacebo 还原，MediaCodec 出画会偏色，因此 profile 5 优先走 gpu-next，不受本项影响；Vulkan 不可用时按下一项的「profile 5 回退方式」处理 |
+| 杜比视界 profile 5 回退方式 | `gpuNextDoviFallback` | `soft` | Vulkan 不可用（驱动不支持、已判定失败，或渲染 API 选了 `opengl`）时 profile 5 的出画方式：`soft` 继续用 gpu-next OpenGL 软解——色彩正确，但 EGL 没有 HDR 交换链，面板不会激发；`mediacodec` 切回 `mediacodec_embed` 直通——杜比视界设备能正常激发，非杜比视界设备拿不到 RPU 会偏色 |
+| 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | profile 5 的 IPTPQc2 依赖 RPU 元数据，`mediacodec-copy` 拿不到（会整体偏色），因此这类片源走 gpu-next 时强制软解（`hwdec=no`）。本项只决定走 gpu-next 时的解码方式，Vulkan 不可用时的回退见上一项 |
 
 ## 三、原生出画层怎么工作
 
@@ -321,8 +322,11 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
    开启「默认 gpu-next」后，profile 5 更进一步**强制**走 gpu-next：即使
    「HDR / 杜比视界时切回 MediaCodec」开着，也不再交给 MediaCodec 直通，
    因为解码器不会把 DoVi RPU 交回给应用，直通的结果就是整片偏色。
-   此时渲染 API 为 `opengl` 或 Vulkan 已被判定不可用时退回 `gpu-next-gl`，
-   色彩仍然正确，只是 EGL 无法激发 HDR，画面会被映射成 SDR。
+   此时渲染 API 为 `opengl` 或 Vulkan 已被判定不可用时，按设置页的
+   「杜比视界 profile 5 回退方式」决定出画：`soft`（默认）退回 `gpu-next-gl` 软解，
+   色彩仍然正确，只是 EGL 无法激发 HDR，画面会被映射成 SDR；`mediacodec`
+   切回 `mediacodec_embed` 直通，杜比视界面板能正常激发，非杜比视界设备会偏色。
+   回退判定（Vulkan 自动回退、纹理回退）会在离开播放页时清空，下次播放重新尝试。
    HDR（125）与杜比视界 profile 8 仍按「切回 MediaCodec」的设置走直通。
 3. **手势限制**：原生 SurfaceView 是独立图层，无法跟随 Flutter 的旋转与镜像。
    HDR 直通时禁用双指旋转、自动重置镜像；缩放/平移通过矩形同步仍然可用。
