@@ -444,6 +444,7 @@ class VideoShotImage extends StatefulWidget {
     required this.height,
     required this.onSetSize,
     required this.isMounted,
+    this.position,
   });
 
   final Map<String, ui.Image?> imageCache;
@@ -455,6 +456,7 @@ class VideoShotImage extends StatefulWidget {
   final double height;
   final Function(double imgXSize, double imgYSize) onSetSize;
   final ValueGetter<bool> isMounted;
+  final String? position;
 
   @override
   State<VideoShotImage> createState() => _VideoShotImageState();
@@ -579,7 +581,7 @@ class _VideoShotImageState extends State<VideoShotImage> {
   late final _borderPaint = Paint()
     ..color = Colors.white
     ..style = PaintingStyle.stroke
-    ..strokeWidth = 1.5;
+    ..strokeWidth = kPreviewStroke;
 
   @override
   Widget build(BuildContext context) {
@@ -592,6 +594,7 @@ class _VideoShotImageState extends State<VideoShotImage> {
         rrect: _rrect,
         imgPaint: _imgPaint,
         borderPaint: _borderPaint,
+        position: widget.position,
       );
     }
     return const SizedBox.shrink();

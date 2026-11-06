@@ -708,7 +708,7 @@ class VideoDetailController extends GetxController
         mediaList: mediaList,
         onChangeEpisode: (episode, {bool manual = false}) async {
           try {
-            return ugcIntroCtr.onChangeEpisode(episode, manual: manual);
+            return await ugcIntroCtr.onChangeEpisode(episode, manual: manual);
           } catch (_) {}
           return false;
         },
@@ -915,7 +915,7 @@ class VideoDetailController extends GetxController
 
     if (videoList.isEmpty) {
       final fallback = allVideos.first;
-      currentVideoQa.value = VideoQuality.fromCode(fallback.id!);
+      currentVideoQa.value = VideoQuality.fromCode(fallback.id);
       return fallback;
     }
 
@@ -1167,7 +1167,7 @@ class VideoDetailController extends GetxController
         // 跨视频/分P时重置画质缓存，确保根据半屏/全屏设置重新选择默认画质。
         // resetTempSettings 在 setDataSource 中执行（HTTP 请求之后），
         // 此处提前重置使得 cacheVideoQa == null 分支能正确初始化。
-        if (PlatformUtils.isMobile) {
+        if (PlatformUtils.isMobile || Platform.isLinux) {
           plPlayerController.cacheVideoQa = null;
         }
         _lastQueryBvid = bvid;
@@ -1198,15 +1198,17 @@ class VideoDetailController extends GetxController
     if (plPlayerController.enableSponsorBlock && isBlock && !fromReset) {
       querySponsorBlock(bvid: bvid, cid: cid.value);
     }
-    if (PlatformUtils.isMobile || Platform.isLinux) {
+    if (PlatformUtils.isMobile ||
+        Platform.isLinux ||
+        plPlayerController.cacheVideoQa == null) {
       final isWiFi = netIsWiFi ?? await ConnectivityUtils.isWiFi;
       if (plPlayerController.cacheVideoQa == null) {
         final fsQa = isWiFi ? Pref.defaultVideoQa : Pref.defaultVideoQaCellular;
         final halfScreenQa = Pref.defaultVideoQaHalfScreen;
         plPlayerController
           // 半屏与蜂窝是两个正交的画质上限，同时命中取较低者（docs/adr/0002）
-          ..cacheVideoQa =
-              !plPlayerController.isFullScreen.value && halfScreenQa != null
+          ..cacheVideoQa = !plPlayerController.isFullScreen.value &&
+                  halfScreenQa != null
               ? min(halfScreenQa, fsQa)
               : fsQa
           ..cacheAudioQa = isWiFi

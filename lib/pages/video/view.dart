@@ -481,6 +481,9 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
           _logSponsorBlock('Refreshing videoState and cid after return');
           videoDetailController.videoState.refresh();
           videoDetailController.cid.refresh();
+          if (videoDetailController.isUgc) {
+            ugcIntroController.updateIndex(force: true);
+          }
           videoDetailController.update();
         });
       } else {
@@ -543,7 +546,9 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
         _logSponsorBlock('Restored VideoReplyController from PiP');
       } else {
         _videoReplyController = Get.put(
-          VideoReplyController(heroTag: heroTag),
+          VideoReplyController(
+            heroTag: heroTag,
+          ),
           tag: heroTag,
         );
       }
@@ -666,6 +671,9 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
           plPlayerController!.play();
         }
         videoDetailController.cid.refresh();
+        if (videoDetailController.isUgc) {
+          ugcIntroController.updateIndex(force: true);
+        }
         videoDetailController.cover.refresh();
 
         // 确保 IntroController 的数据被 UI 识别
@@ -2234,6 +2242,17 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
   }) {
     return KeyboardScrollable(
       controller: resolveCtr,
+      position: () {
+        final index = videoDetailController.tabCtr.index;
+        if (_shouldShowSeasonPanel &&
+            index == (videoDetailController.showReply ? 2 : 1)) {
+          return seasonEpisodeKey.currentState?.activeScrollPosition;
+        }
+        final controller = resolveCtr();
+        return controller != null && controller.hasClients
+            ? controller.position
+            : null;
+      },
       focusNode: tabContentFocusNode,
       child: child,
     );
@@ -2739,6 +2758,7 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
 
   Widget get pgcSeasonPanel {
     Widget child = EpisodePanel(
+      key: seasonEpisodeKey,
       type: .pgc,
       isSidePanel: true,
       enableSlide: false,
@@ -2789,6 +2809,7 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
             else
               Expanded(
                 child: EpisodePanel(
+                  key: seasonEpisodeKey,
                   type: .part,
                   isSidePanel: true,
                   enableSlide: false,
@@ -2814,6 +2835,7 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
             ),
             Expanded(
               child: EpisodePanel(
+                key: seasonEpisodeKey,
                 type: .season,
                 isSidePanel: true,
                 enableSlide: false,
@@ -2901,19 +2923,25 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
 
     if (isSeason) {
       if (!videoDetail.hasSeason) return;
-      // reverse season
-      final section =
-          videoDetail.ugcSeason!.sections![ugcIntroController.sectionIndex];
-      section
-        ..isReversed = !section.isReversed
-        ..episodes = section.episodes!.reversed.toList();
-
-      if (!videoDetailController.plPlayerController.reverseFromFirst) {
-        // keep current episode
+      final item = videoDetail
+          .ugcSeason!
+          .sections![ugcIntroController.sectionIndex];
+      final nextOrder = item.listOrder.next;
+      _applyListOrder(
+        nextOrder: nextOrder,
+        list: item.episodes!,
+        getList: () => item.episodes,
+        setList: (v) => item.episodes = v,
+        backup: item.originalEpisodes,
+        setBackup: (v) => item.originalEpisodes = v,
+        setOrder: (v) => item.listOrder = v,
+      );
+      // refresh or switch episode
+      if (!videoDetailController.plPlayerController.reverseFromFirst ||
+          nextOrder.isShuffle) {
         updateIndex();
       } else {
-        // switch to first episode
-        final episode = section.episodes!.first;
+        final episode = item.episodes!.first;
         if (episode.cid != videoDetailController.cid.value) {
           ugcIntroController.onChangeEpisode(episode);
         } else {
@@ -2922,12 +2950,18 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
       }
     } else {
       if (!videoDetail.hasParts) return;
-      // reverse part
-      videoDetail
-        ..isPageReversed = !videoDetail.isPageReversed
-        ..pages = videoDetail.pages!.reversed.toList();
-      if (!videoDetailController.plPlayerController.reverseFromFirst) {
-        // keep current episode
+      final nextOrder = videoDetail.listOrder.next;
+      _applyListOrder(
+        nextOrder: nextOrder,
+        list: videoDetail.pages!,
+        getList: () => videoDetail.pages,
+        setList: (v) => videoDetail.pages = v,
+        backup: videoDetail.originalPages,
+        setBackup: (v) => videoDetail.originalPages = v,
+        setOrder: (v) => videoDetail.listOrder = v,
+      );
+      if (!videoDetailController.plPlayerController.reverseFromFirst ||
+          nextOrder.isShuffle) {
         updateIndex();
       } else {
         final episode = videoDetail.pages!.first;

@@ -46,7 +46,6 @@ class LocalIntroController extends CommonIntroController {
 
   // 是否正在进入应用内小窗
   bool isEnteringPip = false;
-
   @override
   void onChangeEpisode(BaseEpisodeItem episode) => throw UnimplementedError();
 

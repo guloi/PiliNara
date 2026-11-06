@@ -93,6 +93,11 @@ List<SettingsModel> get hdrSettings => [
     leading: const Icon(Icons.tune),
     getSubtitle: () {
       final backend = HdrBackend.fromValue(Pref.hdrBackend);
+      if (Pref.defaultGpuNext) {
+        return '当前：${backend.label}。已开启「默认 gpu-next」：'
+            '${Pref.gpuNextHdrMediaCodec ? 'HDR / 杜比视界会切回 MediaCodec 直通，' : ''}'
+            '此项只在关闭「默认 gpu-next」后生效。';
+      }
       return '当前：${backend.label}。${backend.desc}';
     },
     onTap: _showHdrBackendDialog,

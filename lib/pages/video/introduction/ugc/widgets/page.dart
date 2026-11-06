@@ -214,6 +214,7 @@ class _PagePanelState extends State<PagePanel> {
               item
                 ..bvid ??= widget.bvid
                 ..cover ??= widget.cover,
+              manual: true,
             );
           },
           child: Stack(

@@ -231,7 +231,7 @@ class _FavDetailPageState extends State<FavDetailPage>
         },
       ),
       if (controller.account.isLogin)
-        PopupMenuButton(
+        StaticPopupMenuButton(
           icon: const Icon(Icons.more_vert),
           itemBuilder: (context) {
             final isOwner = controller.isOwner;

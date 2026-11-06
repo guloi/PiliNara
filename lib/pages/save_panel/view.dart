@@ -372,76 +372,75 @@ class _SavePanelState extends State<SavePanel> {
                     curve: Curves.easeInOut,
                     alignment: .topCenter,
                     duration: const Duration(milliseconds: 255),
-                  child: Column(
-                    mainAxisSize: .min,
-                    crossAxisAlignment: .start,
-                    children: [
-                      IgnorePointer(
-                        child: switch (_item) {
-                          ReplyInfo reply => ReplyItemGrpc(
-                            replyItem: reply,
-                            replyLevel: 0,
-                            needDivider: false,
-                            upMid: widget.upMid,
-                          ),
-                          DynamicItemModel dyn => DynamicPanel(
-                            item: dyn,
-                            isDetail: true,
-                            isSave: true,
-                          ),
-                          _ => throw UnsupportedError(_item.toString()),
-                        },
-                      ),
-                      if (cover?.isNotEmpty == true &&
-                          title?.isNotEmpty == true)
-                        Container(
-                          height: 81,
-                          margin: const .symmetric(horizontal: 12),
-                          padding: const .all(8),
-                          decoration: BoxDecoration(
-                            color: colorScheme.onInverseSurface,
-                            borderRadius: const .all(.circular(8)),
-                          ),
-                          child: Row(
-                            spacing: 10,
-                            children: [
-                              NetworkImgLayer(
-                                src: cover!,
-                                height: coverSize,
-                                width: coverType == .def16_9
-                                    ? coverSize * Style.aspectRatio16x9
-                                    : coverSize,
-                                quality: 100,
-                                borderRadius: const .all(.circular(6)),
-                              ),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: .start,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        '$title\n',
-                                        maxLines: 2,
-                                        overflow: .ellipsis,
-                                      ),
-                                    ),
-                                    if (pubdate != null)
-                                      Text(
-                                        softWrap: false,
-                                        DateFormatUtils.format(
-                                          pubdate,
-                                          format: dateFormat,
-                                        ),
-                                        style: TextStyle(
-                                          color: colorScheme.outline,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                    child: Column(
+                      mainAxisSize: .min,
+                      crossAxisAlignment: .start,
+                      children: [
+                        IgnorePointer(
+                          child: switch (_item) {
+                            ReplyInfo reply => ReplyItemGrpc(
+                              replyItem: reply,
+                              replyLevel: 0,
+                              needDivider: false,
+                              upMid: widget.upMid,
+                            ),
+                            DynamicItemModel dyn => DynamicPanel(
+                              item: dyn,
+                              isDetail: true,
+                              isSave: true,
+                            ),
+                            _ => throw UnsupportedError(_item.toString()),
+                          },
                         ),
+                        if (cover?.isNotEmpty == true &&
+                            title?.isNotEmpty == true)
+                          Container(
+                            height: 81,
+                            margin: const .symmetric(horizontal: 12),
+                            padding: const .all(8),
+                            decoration: BoxDecoration(
+                              color: colorScheme.onInverseSurface,
+                              borderRadius: const .all(.circular(8)),
+                            ),
+                            child: Row(
+                              spacing: 10,
+                              children: [
+                                NetworkImgLayer(
+                                  src: cover!,
+                                  height: coverSize,
+                                  width: coverType == .def16_9
+                                      ? coverSize * Style.aspectRatio16x9
+                                      : coverSize,
+                                  quality: 100,
+                                  borderRadius: const .all(.circular(6)),
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: .start,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '$title\n',
+                                          maxLines: 2,
+                                          overflow: .ellipsis,
+                                        ),
+                                      ),
+                                      if (pubdate != null)
+                                        Text(
+                                          DateFormatUtils.format(
+                                            pubdate,
+                                            format: dateFormat,
+                                          ),
+                                          style: TextStyle(
+                                            color: colorScheme.outline,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         showBottom
                             ? Stack(
                                 clipBehavior: .none,

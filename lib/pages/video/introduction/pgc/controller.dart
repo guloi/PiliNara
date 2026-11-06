@@ -39,6 +39,7 @@ import 'package:material_ui/material_ui.dart';
 typedef OnChangePgcEpisode = Function(
   BaseEpisodeItem episode, {
   PgcEpisodeType? episodeType,
+  bool manual,
 });
 
 class PgcIntroController extends CommonIntroController {
@@ -91,7 +92,7 @@ class PgcIntroController extends CommonIntroController {
 
     super.onInit();
 
-    seasonIndex = pgcItem.seasons!.indexWhere((e) => e.seasonId == seasonId);
+    seasonIndex = pgcItem.seasons?.indexWhere((e) => e.seasonId == seasonId) ?? 0;
     _updateEpisodeIndex(cid.value);
 
     _onGetPgcInfo();

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:math';
 
 import 'package:PiliPlus/common/widgets/button/icon_button.dart';
 import 'package:PiliPlus/common/widgets/scroll_physics.dart' show ReloadMixin;
@@ -124,7 +123,8 @@ class UgcIntroController extends CommonIntroController with ReloadMixin {
         // keep reversed pages
         response
           ..pages = currentDetail.pages
-          ..listOrder = currentDetail.listOrder;
+          ..listOrder = currentDetail.listOrder
+          ..originalPages = currentDetail.originalPages;
       }
       videoDetail.value = response;
       updateIndex(data: response);
@@ -168,7 +168,7 @@ class UgcIntroController extends CommonIntroController with ReloadMixin {
       _partIndex = 0;
     }
 
-    final seasonCid = data.isPageReversed ? data.pages!.last.cid : data.cid;
+    final seasonCid = data.cid;
     if (force || _seasonCid != seasonCid) {
       _seasonCid = seasonCid;
       final season = data.ugcSeason;
@@ -219,10 +219,10 @@ class UgcIntroController extends CommonIntroController with ReloadMixin {
     if (result case Success(:final response)) {
       late final stat = videoDetail.value.stat;
       if (response.like!) {
-        stat?.like = max(1, stat.like);
+        stat?.like = math.max(1, stat.like);
       }
       if (response.favorite!) {
-        stat?.favorite = max(1, stat.favorite);
+        stat?.favorite = math.max(1, stat.favorite);
       }
       hasLike.value = response.like!;
       hasDislike.value = response.dislike!;

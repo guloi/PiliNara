@@ -26,6 +26,8 @@ abstract final class SettingBoxKey {
       dolbyVisionFallback = 'dolbyVisionFallback',
       media3Dovi = 'media3Dovi',
       doviAudioOffset = 'doviAudioOffset',
+      defaultGpuNext = 'defaultGpuNext',
+      gpuNextHdrMediaCodec = 'gpuNextHdrMediaCodec',
       audioOutput = 'audioOutput',
       bufferSize = 'bufferSize',
       bufferSec = 'bufferSec',
@@ -40,6 +42,7 @@ abstract final class SettingBoxKey {
       enableOnlineTotal = 'enableOnlineTotal',
       enableDmCount = 'enableDmCount',
       superChatTimeType = 'superChatTimeType',
+      fullScreenSCWidth = 'fullScreenSCWidth',
       keyboardControl = 'keyboardControl',
       pauseOnMinimize = 'pauseOnMinimize',
       pgcSkipType = 'pgcSkipType',
@@ -228,12 +231,11 @@ abstract final class SettingBoxKey {
       aiModelListCacheTime = 'aiModelListCacheTime',
       aiPromptTemplates = 'aiPromptTemplates',
       aiAutoScroll = 'aiAutoScroll',
-      aiReasoningEffort = 'aiReasoningEffort',
-      superChatType = 'superChatType',
-      enableFullScreenSC = 'enableFullScreenSC',
+      aiReasoningEffort = 'aiReasoningEffort';
+
+  static const String enableFullScreenSC = 'enableFullScreenSC',
       fullScreenSCOpacity = 'fullScreenSCOpacity',
-      fullScreenSCScale = 'fullScreenSCScale',
-      fullScreenSCWidth = 'fullScreenSCWidth';
+      fullScreenSCScale = 'fullScreenSCScale';
 
   static const String minimizeOnExit = 'minimizeOnExit',
       windowSize = 'windowSize',

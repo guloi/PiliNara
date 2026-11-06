@@ -105,72 +105,69 @@ class ZanButtonGrpc extends StatelessWidget {
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       visualDensity: VisualDensity.compact,
     );
-
-    @pragma('vm:prefer-inline')
     Future<void> wrapProcessing(
       Future<void> Function(
         BuildContext context, {
         required bool isLike,
         required bool isDislike,
       })
-      onLikeOrDislike,
+      action,
     ) async {
       if (isProcessing) return;
       isProcessing = true;
-      await onLikeOrDislike(context, isLike: isLike, isDislike: isDislike);
-      isProcessing = false;
+      try {
+        await action(context, isLike: isLike, isDislike: isDislike);
+      } finally {
+        isProcessing = false;
+      }
     }
 
     final dislikeBtn = SizedBox(
-          height: 32,
-          child: TextButton(
-            style: const ButtonStyle(
-              visualDensity: .compact,
-              tapTargetSize: .shrinkWrap,
-              padding: WidgetStatePropertyAll(.zero),
-              minimumSize: WidgetStatePropertyAll(.square(40)),
-            ),
-            onPressed: isLogin
-                ? () => wrapProcessing(onHateReply)
-                : _toastNotLogin,
-            child: Icon(
-              isDislike
-                  ? FontAwesomeIcons.solidThumbsDown
-                  : FontAwesomeIcons.thumbsDown,
-              size: 16,
-              color: isDislike ? primary : outline,
-              semanticLabel: isDislike ? '已踩' : '点踩',
-            ),
-          ),
+      height: 32,
+      child: TextButton(
+        style: const ButtonStyle(
+          visualDensity: .compact,
+          tapTargetSize: .shrinkWrap,
+          padding: WidgetStatePropertyAll(.zero),
+          minimumSize: WidgetStatePropertyAll(.square(40)),
+        ),
+        onPressed: isLogin ? () => wrapProcessing(onHateReply) : _toastNotLogin,
+        child: Icon(
+          isDislike
+              ? FontAwesomeIcons.solidThumbsDown
+              : FontAwesomeIcons.thumbsDown,
+          size: 16,
+          color: isDislike ? primary : outline,
+          semanticLabel: isDislike ? '已踩' : '点踩',
+        ),
+      ),
     );
     final likeBtn = SizedBox(
-          height: 32,
-          child: TextButton(
-            style: style,
-            onPressed: isLogin
-                ? () => wrapProcessing(onLikeReply)
-                : _toastNotLogin,
-            child: Row(
-              spacing: 4,
-              children: [
-                Icon(
-                  isLike
-                      ? FontAwesomeIcons.solidThumbsUp
-                      : FontAwesomeIcons.thumbsUp,
-                  size: 16,
-                  color: isLike ? primary : outline,
-                  semanticLabel: isLike ? '已赞' : '点赞',
-                ),
-                Text(
-                  NumUtils.numFormat(replyItem.like.toInt()),
-                  style: TextStyle(
-                    color: isLike ? primary : outline,
-                    fontSize: theme.textTheme.labelSmall!.fontSize,
-                  ),
-                ),
-              ],
+      height: 32,
+      child: TextButton(
+        style: style,
+        onPressed: isLogin ? () => wrapProcessing(onLikeReply) : _toastNotLogin,
+        child: Row(
+          spacing: 4,
+          children: [
+            Icon(
+              isLike
+                  ? FontAwesomeIcons.solidThumbsUp
+                  : FontAwesomeIcons.thumbsUp,
+              size: 16,
+              color: isLike ? primary : outline,
+              semanticLabel: isLike ? '已赞' : '点赞',
             ),
-          ),
+            Text(
+              NumUtils.numFormat(replyItem.like.toInt()),
+              style: TextStyle(
+                color: isLike ? primary : outline,
+                fontSize: theme.textTheme.labelSmall!.fontSize,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
     final swap = Pref.swapReplyLikeDislike;
     return Row(

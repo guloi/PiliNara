@@ -1220,7 +1220,6 @@ abstract final class Pref {
   static double get sideBarThreshold =>
       (_setting.get(SettingBoxKey.sideBarThreshold, defaultValue: 600.0) as num)
           .toDouble();
-
   static bool get hideSideBarLabel =>
       _setting.get(SettingBoxKey.hideSideBarLabel, defaultValue: false);
 
@@ -1366,6 +1365,14 @@ abstract final class Pref {
   /// Media3 DoVi 路径的音画偏移（毫秒），正值让视频目标位置更靠后。
   static int get doviAudioOffset =>
       _setting.get(SettingBoxKey.doviAudioOffset, defaultValue: 0);
+
+  /// 是否默认使用 gpu-next 渲染（SDR 也走 libplacebo）。
+  static bool get defaultGpuNext =>
+      _setting.get(SettingBoxKey.defaultGpuNext, defaultValue: false);
+
+  /// 「默认 gpu-next」开启时，HDR / 杜比视界片源是否仍切回 MediaCodec 直通。
+  static bool get gpuNextHdrMediaCodec =>
+      _setting.get(SettingBoxKey.gpuNextHdrMediaCodec, defaultValue: true);
 
   static Set<int> get danmakuBlockType => Set<int>.from(
     _setting.get(SettingBoxKey.danmakuBlockType, defaultValue: const <int>{}),
