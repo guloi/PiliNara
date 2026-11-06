@@ -54,11 +54,11 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
               ? '渲染 API 为 OpenGL 时建议保持开启：EGL 没有 HDR 交换链，'
                     'HDR / 杜比视界只有交给 MediaCodec 直通才能真正激发；'
                     '关闭后这类片源会被 libplacebo 映射成 SDR。'
-                    '杜比视界 profile 5 例外：它始终走 gpu-next，否则会偏色。'
+                    '杜比视界 profile 5 例外：它优先走 gpu-next，Vulkan 不可用时按下面的「回退方式」处理。'
               : 'HDR / 杜比视界片源改用 MediaCodec 直通出画'
                     '（mediacodec_embed），只让 SDR 片源走 gpu-next。'
                     '关闭时 HDR / 杜比视界也交给 gpu-next 处理。'
-                    '杜比视界 profile 5 例外：它始终走 gpu-next，否则会偏色。',
+                    '杜比视界 profile 5 例外：它优先走 gpu-next，Vulkan 不可用时按下面的「回退方式」处理。',
           leading: const Icon(Icons.hdr_on),
           setKey: SettingBoxKey.gpuNextHdrMediaCodec,
           defaultVal: true,
