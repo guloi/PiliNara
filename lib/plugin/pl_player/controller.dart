@@ -2865,10 +2865,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
     final player = await Player.create(
       configuration: PlayerConfiguration(
-        // 临时调成 verbose：libplacebo 建交换链时打的
-        // 「Available surface configurations / Picked surface configuration」
-        // 是判断全屏后交换链有没有掉回 8bit/SDR 的唯一证据。
-        // 见 docs/hdr.md 7.5；定位完改回 kDebugMode ? .warn : .error。
+        // 级别来自「HDR 状态诊断」对话框右上角的日志开关（默认 info）。
+        // libplacebo 建交换链时打的「Available / Picked surface
+        // configuration」在 info 以上才收得到，是判断全屏后交换链有没有
+        // 掉回 8bit/SDR 的唯一证据；级别只在建播放器时下发，改完要重开视频。
+        // 见 docs/hdr.md 7.5。
         logLevel: mpvLogLevel,
         options: opt,
       ),

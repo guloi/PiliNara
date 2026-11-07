@@ -143,15 +143,6 @@ List<SettingsModel> get hdrSettings => [
     onChanged: (value) =>
         PlPlayerController.instance?.refreshNativeSurfaceSizeDebug(),
   ),
-  PopupModel<LogLevelType>(
-    title: 'mpv 日志等级（诊断，重新打开视频生效）',
-    leading: const Icon(Icons.subject),
-    value: () => Pref.logLevelType,
-    items: LogLevelType.values,
-    onSelected: (value, setState) => GStorage.setting
-        .put(SettingBoxKey.logLevelType, value.index)
-        .whenComplete(setState),
-  ),
   NormalModel(
     title: 'HDR 状态诊断',
     subtitle: '查看当前片源的 mpv 色彩、解码方式与色调映射参数，用于排查 HDR 不生效',
@@ -193,17 +184,54 @@ Future<void> _showHdrDebugDialog(
       : '$info\n\n--- 原生层 ---\n$surfaceInfo';
   await showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('HDR 状态诊断'),
-      content: SingleChildScrollView(
-        child: SelectableText(
-          detail,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Row(
+          children: [
+            const Expanded(child: Text('HDR 状态诊断')),
+            // mpv 日志等级：级别只在 Player.create 时通过
+            // mpv_request_log_messages 下发，所以改完要重新打开视频。
+            PopupMenuButton<LogLevelType>(
+              tooltip: 'mpv 日志等级',
+              initialValue: Pref.logLevelType,
+              onSelected: (value) {
+                GStorage.setting.put(
+                  SettingBoxKey.logLevelType,
+                  value.index,
+                );
+                setDialogState(() {});
+              },
+              itemBuilder: (context) => [
+                for (final item in LogLevelType.values)
+                  PopupMenuItem<LogLevelType>(
+                    value: item,
+                    child: Text(item.label),
+                  ),
+              ],
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.subject, size: 18),
+                    const SizedBox(width: 4),
+                    Text('日志 ${Pref.logLevelType.label}'),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            detail,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: Get.back, child: const Text('关闭')),
+        ],
       ),
-      actions: [
-        TextButton(onPressed: Get.back, child: const Text('关闭')),
-      ],
     ),
   );
 }

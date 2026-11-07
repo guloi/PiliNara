@@ -464,10 +464,11 @@ libplacebo 色调映射目标偏低）在应用侧看不出来，只能靠 libpl
 
 mpv 客户端的日志级别由 `PlayerConfiguration.logLevel` 决定（默认 release 是
 `error`），这两行**默认收不到**；实测放到 `info` 也收不到，要放到 `MPVLogLevel.v`。
-级别现在可以在「设置 → HDR / 杜比视界 → mpv 日志等级（诊断）」里切
-（`SettingBoxKey.logLevelType` / `Pref.logLevelType` / `LogLevelType`），注意
-`logLevel` 只在 `Player.create` 时通过 `mpv_request_log_messages` 下发，
-**改完要重新打开视频**才生效。
+级别可以在「设置 → HDR / 杜比视界 → HDR 状态诊断」对话框右上角的
+「日志 …」按钮里切（`SettingBoxKey.logLevelType` / `Pref.logLevelType` /
+`LogLevelType`，默认 `info`）。注意 `logLevel` 只在 `Player.create` 时通过
+`mpv_request_log_messages` 下发（media_kit 没有 setLogLevel），**改完要重新打开
+视频**才生效；对话框里的内容仍是打开那一刻抓的，重开视频后再看才是新级别的输出。
 
 诊断里的「mpv 日志: 要求 v，已收到 …」那一行是按 level 统计的到达计数：
 如果 `v` 一直是 0，问题在 media_kit / libmpv 没放开，而不是这边的
