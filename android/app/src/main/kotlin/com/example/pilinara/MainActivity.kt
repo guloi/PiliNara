@@ -192,6 +192,9 @@ class MainActivity : AudioServiceActivity() {
                         doviPlayer?.prepare(url, audioUrl, referer, userAgent) == true,
                     )
                 }
+                "doviRebind" -> {
+                    result.success(doviPlayer?.rebindSurface() == true)
+                }
                 "doviPlay" -> {
                     doviPlayer?.play()
                     result.success(null)

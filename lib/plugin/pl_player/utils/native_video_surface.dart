@@ -41,6 +41,10 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
   bool _created = false;
   bool _attached = false;
   int? _surfaceWid;
+
+  /// 已经交给控制器的 wid。Surface 被重建后（换缓冲格式、Activity 重建）
+  /// wid 会变，必须重新 attach，否则控制器/mpv 仍拿着已失效的 Surface。
+  int? _attachedWid;
   (int, int, int, int)? _lastRect;
   bool _disposed = false;
   bool _frameScheduled = false;
@@ -142,6 +146,7 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
       case 'surfaceDestroyed':
         _surfaceWid = null;
         _attached = false;
+        _attachedWid = null;
         widget.controller.detachNativeSurface(_owner);
         break;
       // 布局尺寸变化（全屏/旋转/小窗拖动）：同步给 mpv 的
@@ -160,14 +165,15 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
   void _attachOrResize(int nativeWidth, int nativeHeight) {
     final wid = _surfaceWid;
     if (wid == null || nativeWidth <= 1 || nativeHeight <= 1) return;
-    if (!_attached) {
+    if (!_attached || _attachedWid != wid) {
+      _attached = true;
+      _attachedWid = wid;
       widget.controller.attachNativeSurface(
         _owner,
         wid,
         nativeWidth,
         nativeHeight,
       );
-      _attached = true;
     } else {
       widget.controller.resizeNativeSurface(
         _owner,

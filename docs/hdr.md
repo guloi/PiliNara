@@ -339,6 +339,10 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
    切回 `mediacodec_embed` 直通，杜比视界面板能正常激发，非杜比视界设备会偏色。
    回退判定（Vulkan 自动回退、纹理回退）会在离开播放页时清空，下次播放重新尝试。
    HDR（125）与杜比视界 profile 8 仍按「切回 MediaCodec」的设置走直通。
+   关掉「软解」后如果还开着 HDR 设置里的「profile 5 Media3 解码（实验）」，
+   视频会改由 Media3/ExoPlayer 解到同一块原生 SurfaceView，mpv 只保留时间轴；
+   此时诊断里的 vo / vo-configured 仍显示 gpu-next，那是 media_kit 给 mpv
+   建的纹理输出，不参与出画，属正常现象（真正的出画路径看「真 DoVi 解码」那行）。
 3. **手势限制**：原生 SurfaceView 是独立图层，无法跟随 Flutter 的旋转与镜像。
    HDR 直通时禁用双指旋转、自动重置镜像；缩放/平移通过矩形同步仍然可用。
 4. **PiP**：支持，但小窗圆角无法裁切原生图层（会看到直角视频）；

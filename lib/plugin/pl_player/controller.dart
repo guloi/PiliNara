@@ -1329,6 +1329,44 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     return '${size.width.toStringAsFixed(0)}x${size.height.toStringAsFixed(0)}';
   }
 
+  /// 诊断里「是否真的发生过自动回退」。
+  ///
+  /// 不能只比较 _renderBackend 与设置里的值：杜比视界 profile 5 会按自己的
+  /// 规则改变后端（例如关闭「软解」时直接走 MediaCodec 直通），那是设置生效，
+  /// 不是设备 / VO 失败触发的回退。
+  String _autoFallbackLabel() {
+    final configured = HdrBackend.fromValue(Pref.hdrBackend);
+    if (_renderBackend == configured) return '';
+    final fellBack =
+        _vulkanVoBlocked ||
+        _vulkanVoUnavailable ||
+        _gpuNextTextureUnavailable ||
+        _gpuNextVulkanTextureUnavailable;
+    if (fellBack) {
+      return '，已自动回退（原 ${configured.label}）';
+    }
+    return '，按当前片源 / 设置使用（HDR 设置里选的是 ${configured.label}）';
+  }
+
+  /// `vo` 只会显示 gpu-next / gpu，看不出底层到底是 Vulkan 还是 OpenGL。
+  ///
+  /// 优先用 mpv 自己报的 `gpu-api` / `gpu-context`（VO 配置完成后才有值），
+  /// 读不到时按控制器实际下发的后端推断（Media3 路径下 mpv 只是纹理占位）。
+  String _voApiLabel(String vo, String gpuApi, String gpuContext) {
+    if (!vo.contains('gpu')) return '';
+    final String api;
+    if (gpuApi != '-') {
+      api = gpuApi;
+    } else if (gpuContext != '-') {
+      api = gpuContext.contains('vk') ? 'vulkan' : 'opengl';
+    } else {
+      api =
+          _renderBackend.gpuApi ??
+          (_gpuNextApi == GpuNextApi.vulkan ? 'vulkan' : 'opengl');
+    }
+    return api == 'vulkan' ? 'Vulkan' : 'OpenGL';
+  }
+
   String get hdrDebugInfo {
     final player = _videoPlayerController;
     if (player == null) return lastHdrInfo;
@@ -1343,12 +1381,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
 
     final native = nativeSurfaceMode.value;
+    final voName = read('vo');
+    final gpuApi = read('gpu-api');
+    final gpuContext = read('gpu-context');
+    final voApi = _voApiLabel(voName, gpuApi, gpuContext);
     final doviLabel = !isDolbyVisionSource
         ? '否'
         : '是（${isDolbyVisionProfile5 ? 'profile 5' : 'profile 8'}）';
     return [
       '出画路径: ${native ? 'SurfaceView(HDR)' : 'Texture(8bit)'}',
-      if (_useMedia3Dovi) '真 DoVi 解码: Media3 / ExoPlayer（视频），mpv 音频',
+      if (_useMedia3Dovi)
+        '真 DoVi 解码: Media3 / ExoPlayer（视频 + 音频），'
+            'mpv 只保留时间轴（下面的 vo / hwdec 是 mpv 自己的纹理输出，不参与出画）',
       if (native)
         '原生 Surface: wid=${_nativeWid ?? '-'}，'
             'SurfaceView 尺寸=${_nativeSurfaceSize == null ? '-' : '${_nativeSurfaceSize!.$1}x${_nativeSurfaceSize!.$2}'}',
@@ -1363,9 +1407,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       if (native)
         '直通挖孔矩形: ${_nativeRectLabel(nativeHoleRect.value)} / '
             '页面尺寸: ${_sizeLabel(nativePageSize.value)}',
-      'vo: ${read('vo')}',
+      'vo: $voName${voApi.isEmpty ? '' : '（$voApi）'}',
       'vo-configured: ${read('vo-configured')}',
-      'gpu-api: ${read('gpu-api')} / gpu-context: ${read('gpu-context')}',
+      'gpu-api: $gpuApi / gpu-context: $gpuContext',
       'hwdec-current: ${read('hwdec-current')}',
       '视频色彩: ${read('video-params/primaries')} / ${read('video-params/gamma')}',
       '像素格式: ${read('video-params/pixelformat')}',
@@ -1383,7 +1427,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'HDR 开关: ${Pref.enableHdr ? '开' : '关'}，'
           '直通出画: ${Pref.hdrSurface ? '开' : '关'}，'
           '后端: ${_renderBackend.label} (${_renderBackend.gpuApi ?? '-'})'
-          '${_renderBackend != HdrBackend.fromValue(Pref.hdrBackend) ? '，已自动回退（原 ${HdrBackend.fromValue(Pref.hdrBackend).label}）' : ''}',
+          '${_autoFallbackLabel()}',
       'Vulkan 自动回退: ${_vulkanVoBlocked ? '已触发（跳过 Vulkan，10 分钟后自动重试）' : (_vulkanVoUnavailable ? '冷却已过，下次播放重试 Vulkan' : '未触发')}',
       '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 ? '，profile 5 ${Pref.gpuNextDoviSoft ? '软解' : '硬解拷贝'}，回退方式「${GpuNextDoviFallback.fromValue(Pref.gpuNextDoviFallback).label}」' : ''}）' : '关'}',
       if (native && _renderBackend.gpuApi == 'vulkan')
@@ -1519,7 +1563,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 完成后补一次，避免刚设置的 vo 被 media_kit 的初始化覆盖成 null。
     if (_videoPlayerController != null) {
       if (_useMedia3Dovi) {
-        _scheduleDoviPrepare();
+        if (_doviPrepared) {
+          // 已经在播：Surface 换了就把 ExoPlayer 重新绑上，不能重新 prepare，
+          // 否则会从这一集的开头重新解码。
+          unawaited(NativeVideoSurfaceChannel.doviRebind());
+        } else {
+          _scheduleDoviPrepare();
+        }
       } else {
         _applyNativeSurface();
       }
@@ -2620,6 +2670,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 在创建 VO 之前补写一次，否则 gpu-next 永远走 OpenGL。
     _applyHdrProperties(player, hdrSurface: nativeSurfaceMode.value);
 
+    // media_kit 的 AndroidVideoController.create 会无条件写 vid=auto，把上面
+    // 关掉的 mpv 视频轨重新打开：Media3 DoVi 路径下 mpv 会再解一遍视频，既
+    // 白烧解码器，也会和 ExoPlayer 抢同一块 Surface（表现为 aimagereader 取帧
+    // 失败 / 黑屏）。创建完 VideoController 之后再补写一次。
+    if (_useMedia3Dovi) {
+      player.setProperty('vid', 'no');
+      player.setProperty('aid', 'no');
+    }
+
     if (Platform.isAndroid) {
       // Avoid sizing the surface using mpv's idle window between media loads.
       player.setProperty('force-window', 'no');
@@ -2833,6 +2892,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       ),
       play: false,
     );
+    // 换 P / 换集时 mpv 播放器是复用的，视频轨必须保持关闭：画面只由 Media3
+    // 送到原生 SurfaceView，mpv 同时解一份会把解码器耗尽并让画面变黑。
+    if (_useMedia3Dovi) {
+      player.setProperty('vid', 'no');
+      player.setProperty('aid', 'no');
+    }
     // 同一个 mpv 实例换文件后，VO 可能被重置（wid/vo 丢失），而界面不会
     // 重新 attach SurfaceView。此时按已保存的 wid 重新初始化原生出画，
     // 且发生在 play 之前，不会出现可见黑闪。

@@ -98,6 +98,10 @@ abstract final class NativeVideoSurfaceChannel {
       }) ??
       false;
 
+  /// 原生 Surface 被重建后，让 ExoPlayer 重新绑到当前 SurfaceView。
+  static Future<bool> doviRebind() async =>
+      await channel.invokeMethod<bool>('doviRebind') ?? false;
+
   static Future<void> doviPlay() =>
       channel.invokeMethod<void>('doviPlay');
 
