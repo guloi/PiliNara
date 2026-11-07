@@ -1,4 +1,5 @@
 import 'package:PiliPlus/common/widgets/scaffold/simple_scaffold.dart';
+import 'package:PiliPlus/models/common/hdr_debug_log_level_type.dart';
 import 'package:PiliPlus/pages/setting/models/model.dart';
 import 'package:PiliPlus/pages/setting/widgets/select_dialog.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
@@ -141,6 +142,15 @@ List<SettingsModel> get hdrSettings => [
     defaultVal: false,
     onChanged: (value) =>
         PlPlayerController.instance?.refreshNativeSurfaceSizeDebug(),
+  ),
+  PopupModel<LogLevelType>(
+    title: 'mpv 日志等级（诊断，重新打开视频生效）',
+    leading: const Icon(Icons.subject),
+    value: () => Pref.logLevelType,
+    items: LogLevelType.values,
+    onSelected: (value, setState) => GStorage.setting
+        .put(SettingBoxKey.logLevelType, value.index)
+        .whenComplete(setState),
   ),
   NormalModel(
     title: 'HDR 状态诊断',

@@ -12,6 +12,7 @@ import 'package:PiliPlus/http/video.dart';
 import 'package:PiliPlus/models/common/account_type.dart';
 import 'package:PiliPlus/models/common/audio_normalization.dart';
 import 'package:PiliPlus/models/common/dm_chart_source.dart';
+import 'package:PiliPlus/models/common/hdr_debug_log_level_type.dart';
 import 'package:PiliPlus/models/common/super_resolution_type.dart';
 import 'package:PiliPlus/models/common/video/video_type.dart';
 import 'package:PiliPlus/models/user/danmaku_rule.dart';
@@ -2852,14 +2853,23 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     );
 
     final hwdec = _resolveHwdec();
+
+    final mpvLogLevel = switch (Pref.logLevelType) {
+      LogLevelType.v => MPVLogLevel.v,
+      LogLevelType.info => MPVLogLevel.info,
+      LogLevelType.warn => MPVLogLevel.warn,
+      LogLevelType.error => MPVLogLevel.error,
+      LogLevelType.debug => MPVLogLevel.debug,
+      LogLevelType.trace => MPVLogLevel.trace,
+    };
+
     final player = await Player.create(
       configuration: PlayerConfiguration(
         // 临时调成 verbose：libplacebo 建交换链时打的
         // 「Available surface configurations / Picked surface configuration」
-        // 在 mpv 里至少在 info 以上（实测 info 收不到，故放到 v），
         // 是判断全屏后交换链有没有掉回 8bit/SDR 的唯一证据。
         // 见 docs/hdr.md 7.5；定位完改回 kDebugMode ? .warn : .error。
-        logLevel: .v,
+        logLevel: mpvLogLevel,
         options: opt,
       ),
     );

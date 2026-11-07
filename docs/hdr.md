@@ -463,9 +463,11 @@ libplacebo 色调映射目标偏低）在应用侧看不出来，只能靠 libpl
 * info 级 `Picked surface configuration N: <format> + <colorspace>` 是最终选中的那个。
 
 mpv 客户端的日志级别由 `PlayerConfiguration.logLevel` 决定（默认 release 是
-`error`），这两行**默认收不到**；实测放到 `info` 也收不到，诊断期间要放到
-`MPVLogLevel.v`（见 `controller.dart` 里 `Player.create` 的临时注释），定位完再改回
-`kDebugMode ? .warn : .error`。
+`error`），这两行**默认收不到**；实测放到 `info` 也收不到，要放到 `MPVLogLevel.v`。
+级别现在可以在「设置 → HDR / 杜比视界 → mpv 日志等级（诊断）」里切
+（`SettingBoxKey.logLevelType` / `Pref.logLevelType` / `LogLevelType`），注意
+`logLevel` 只在 `Player.create` 时通过 `mpv_request_log_messages` 下发，
+**改完要重新打开视频**才生效。
 
 诊断里的「mpv 日志: 要求 v，已收到 …」那一行是按 level 统计的到达计数：
 如果 `v` 一直是 0，问题在 media_kit / libmpv 没放开，而不是这边的
