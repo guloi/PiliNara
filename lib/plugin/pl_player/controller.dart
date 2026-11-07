@@ -703,7 +703,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   final List<String> _mpvVoLog = [];
 
   /// [_mpvVoLog] 的条数上限：诊断文本要塞进设置页弹窗，留太多会刷屏。
-  static const int _mpvVoLogLimit = 20;
+  static const int _mpvVoLogLimit = 40;
+
+  /// 收到的 mpv 日志按 level 计数。
+  ///
+  /// 用来证明「diagnostics 要求了 verbose，libplacebo 的行到底有没有到 Dart
+  /// 这一层」：如果 verbose 计数一直是 0，说明是 media_kit / libmpv 那边没放开，
+  /// 而不是过滤条件写错了。
+  final Map<String, int> _mpvLogLevelCounts = {};
 
   /// 「默认 gpu-next」总开关：SDR 片源也走 gpu-next（libplacebo）渲染。
   ///
@@ -1523,8 +1530,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'VO 输出色彩: ${read('video-out-params/primaries')} / '
           '${read('video-out-params/gamma')} / '
           '${read('video-out-params/colorlevels')}',
-      'VO 输出尺寸: ${read('video-out-params/w')}x${read('video-out-params/h')}'
-          '（交换链分辨率）',
+      // 这两项是 VO 拿到的帧参数（=片源尺寸），不是交换链尺寸；
+      // 交换链真正的尺寸/格式只能从 libplacebo 的面配置日志里看。
+      'VO 输入帧尺寸: ${read('video-out-params/w')}x${read('video-out-params/h')}',
       '窗口 HDR 预切: ${_windowHdrRequested ? '是' : '否'} / '
           '实际 colorMode=${_windowHdrColorMode ?? '-'}（4=HDR，0=默认）',
       if (_displayHdrInfo != null) _displayHdrLabel(_displayHdrInfo!),
@@ -1542,6 +1550,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
       if (_lastFallbackReason != null) '自动回退原因: $_lastFallbackReason',
       if (_mpvErrorLog.isNotEmpty) 'mpv 错误: ${_mpvErrorLog.last}',
+      'mpv 日志: 要求 verbose，已收到 '
+          '${_mpvLogLevelCounts.entries.map((e) => '${e.key}=${e.value}').join(' ')}',
       if (_mpvVoLog.isNotEmpty)
         'mpv VO 日志（最近 ${_mpvVoLog.length} 条，--- 开头是应用侧动作）:\n'
             '${_mpvVoLog.join('\n')}',
@@ -2758,20 +2768,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
   }
 
-  /// 只保留和交换链 / 色彩空间 / HDR 有关的 VO 日志，其余照旧过滤掉。
+  /// 只保留 VO / 交换链相关的日志（libplacebo 的交换链面配置就挂在这些前缀下）。
+  ///
+  /// 早先还按关键字过滤，结果 libplacebo 的行被误杀掉，诊断里一条都没有；
+  /// 现在只按前缀筛，关键字判断交给读者。
   bool _isVoDiagLog(PlayerLog log) {
-    if (!log.prefix.startsWith('vo') && !log.prefix.startsWith('vulkan')) {
-      return false;
-    }
-    final text = log.text.toLowerCase();
-    return text.contains('swapchain') ||
-        text.contains('surface configuration') ||
-        text.contains('color') ||
-        text.contains('hdr') ||
-        text.contains('dataspace') ||
-        text.contains('reconfig') ||
-        text.contains('resize') ||
-        text.contains('format');
+    final prefix = log.prefix.toLowerCase();
+    return prefix.startsWith('vo') ||
+        prefix.startsWith('vulkan') ||
+        prefix.contains('libplacebo') ||
+        prefix.contains('vulkan') ||
+        prefix.contains('androidvk');
   }
 
   /// 往 [_mpvVoLog] 追加一行（带时间戳，便于对齐全屏/尺寸变化的时刻）。
@@ -2825,12 +2832,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final hwdec = _resolveHwdec();
     final player = await Player.create(
       configuration: PlayerConfiguration(
-        // 临时调成 info：libplacebo 建交换链时的
+        // 临时调成 verbose：libplacebo 建交换链时打的
         // 「Available surface configurations / Picked surface configuration」
-        // 是 info 级，只有放开日志才拿得到，用来判断全屏后交换链有没有
-        // 掉回 8bit/SDR（见 docs/hdr.md 7.5）。定位完改回
-        // kDebugMode ? .warn : .error。
-        logLevel: .info,
+        // 在 mpv 里至少在 info 以上（实测 info 收不到，故放到 verbose），
+        // 是判断全屏后交换链有没有掉回 8bit/SDR 的唯一证据。
+        // 见 docs/hdr.md 7.5；定位完改回 kDebugMode ? .warn : .error。
+        logLevel: .verbose,
         options: opt,
       ),
     );
@@ -2848,8 +2855,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // Vulkan 则是一张黑图。这里按日志提前回退，并留一份尾巴供诊断显示。
     player.stream.log.listen((log) {
       // 交换链 / 色彩空间相关的日志不分 level 都留一份：libplacebo 建交换链时
-      // 打的是 info 级（Available surface configurations / Picked surface
-      // configuration），恰好是全屏后「有没有 10bit + HDR 面」的唯一证据。
+      // 打的「Available surface configurations / Picked surface configuration」
+      // 恰好是全屏后「有没有 10bit + HDR 面」的唯一证据。
+      _mpvLogLevelCounts[log.level] = (_mpvLogLevelCounts[log.level] ?? 0) + 1;
       if (_isVoDiagLog(log)) _noteVoLog('${log.prefix}: ${log.text}');
       if (log.level != 'error' && log.level != 'fatal') return;
       final line = '${log.prefix}: ${log.text}';

@@ -463,9 +463,13 @@ libplacebo 色调映射目标偏低）在应用侧看不出来，只能靠 libpl
 * info 级 `Picked surface configuration N: <format> + <colorspace>` 是最终选中的那个。
 
 mpv 客户端的日志级别由 `PlayerConfiguration.logLevel` 决定（默认 release 是
-`error`），info 级的这两行**默认收不到**。诊断期间先把它调成 `info`
-（见 `controller.dart` 里 `Player.create` 的临时注释），定位完再改回
+`error`），这两行**默认收不到**；实测放到 `info` 也收不到，诊断期间要放到
+`verbose`（见 `controller.dart` 里 `Player.create` 的临时注释），定位完再改回
 `kDebugMode ? .warn : .error`。
+
+诊断里的「mpv 日志: 要求 verbose，已收到 …」那一行是按 level 统计的到达计数：
+如果 `verbose` 一直是 0，问题在 media_kit / libmpv 没放开，而不是这边的
+过滤条件写错了（早先版本确实按关键字把 libplacebo 的行误杀过一轮）。
 
 另一条更省事的判据是 mpv 的 `video-out-params`（诊断里的「VO 输出色彩」）：
 它就是 libplacebo 实际出画的色彩空间，`pq` + `bt.2020` 说明 HDR 确实交给了
