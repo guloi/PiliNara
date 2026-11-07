@@ -47,15 +47,22 @@ enum HdrBackend {
     'libplacebo + Vulkan，可协商 HDR 交换链；需要带 Vulkan 且带 SPIR-V 编译器（shaderc）的 libmpv。初始化失败时 HDR 片源回退 MediaCodec 直通，其余回退 OpenGL',
   ),
 
-  /// 老版本的 gpu-next 路径：libplacebo + OpenGL/EGL。
-  /// 仍可做 tone mapping，但 Android EGL 没有 HDR 色彩空间扩展，通常只能输出 SDR。
+  /// gpu-next 的 OpenGL/EGL 路径：libplacebo + OpenGL。
+  ///
+  /// 原生 Android EGL 没有 HDR 色彩空间扩展，但配合同仓库的 libmpv 补丁
+  /// （挑选 10bit EGLConfig + 把窗口 dataspace 声明成 BT.2020/PQ + 让
+  /// libplacebo 按调用方给的色彩空间编码）后，EGL 窗口缓冲来自 gralloc，
+  /// 是 UBWC 压缩的，SurfaceFlinger 能把 HDR 图层直接交给 HWC 合成（含旋转）。
+  /// 这条路径正是为了解决「Vulkan 交换链只给线性缓冲 → 旋转后被迫 CLIENT
+  /// 合成 → PQ 被画进 SDR target → 画面几乎全黑」。
   gpuNextGl(
     'gpu-next-gl',
     'gpu-next',
-    'gpu-next OpenGL（兼容）',
+    'gpu-next OpenGL',
     'opengl',
     'android',
-    'libplacebo + OpenGL/EGL；兼容老设备，但通常只能输出 SDR',
+    'libplacebo + OpenGL/EGL，输出 10bit BT.2020/PQ；缓冲走 EGL/gralloc（UBWC），'
+        '全屏 / 横屏旋转时 HWC 可直接合成。需要打过 GL HDR 补丁的 libmpv',
   ),
 
   /// 传统 GPU 渲染，兼容性更好，但通常无法激发 HDR。
@@ -111,10 +118,12 @@ enum HdrBackend {
 
   /// 是否有可能真正把 HDR 交给显示端。
   ///
-  /// `gpu-next` 走 Vulkan 交换链色彩空间协商；`mediacodec_embed` 由解码器
-  /// 直接送显。`gpu-next-gl` / `gpu` 的 EGL 路径没有 HDR 输出能力，不能把
+  /// `gpu-next` 走 Vulkan 交换链色彩空间协商；`gpu-next-gl` 靠 libmpv 的
+  /// Android/EGL 补丁把窗口缓冲切成 10bit 并声明 BT.2020/PQ dataspace；
+  /// `mediacodec_embed` 由解码器直接送显。传统 `gpu` 没有这套处理，不能把
   /// 窗口预切成 HDR，否则 SDR 画面会被系统当成 HDR 显示而发灰。
-  bool get supportsHdrOutput => this == gpuNext || this == mediacodecEmbed;
+  bool get supportsHdrOutput =>
+      this == gpuNext || this == gpuNextGl || this == mediacodecEmbed;
 
   /// 是否能由 libplacebo 解析杜比视界 RPU（profile 5 的 IPTPQc2）。
   ///
@@ -131,12 +140,17 @@ enum HdrBackend {
 /// * [auto]：HDR / 杜比视界走 Vulkan 交换链，能真正点亮 HDR 面板；SDR 走纹理
 ///   gpu-next OpenGL；
 /// * [vulkan]：SDR 也走 Vulkan 纹理，统一由 Vulkan 交换链出画；
-/// * [opengl]：全部走 OpenGL，兼容性最好，但 Android 的 EGL 路径没有 HDR
-///   交换链，HDR 片源只能由 libplacebo 映射成 SDR。
+/// * [opengl]：全部走 OpenGL。配合同仓库的 libmpv GL HDR 补丁，Android EGL
+///   也能输出 10bit BT.2020/PQ（缓冲走 EGL/gralloc 的 UBWC，旋转时 HWC 仍可
+///   直接合成）；没有该补丁的 libmpv 上 HDR 片源会被映射成 SDR。
 enum GpuNextApi {
   auto('auto', '自动（推荐）', 'SDR 走 OpenGL，HDR / 杜比视界走 Vulkan'),
   vulkan('vulkan', 'Vulkan', '全部走 Vulkan，HDR 激发最完整，依赖驱动'),
-  opengl('opengl', 'OpenGL', '全部走 OpenGL，兼容性最好，无法激发 HDR');
+  opengl(
+    'opengl',
+    'OpenGL',
+    '全部走 OpenGL/EGL，同样能输出 10bit BT.2020/PQ（需要打过 GL HDR 补丁的 libmpv）',
+  );
 
   const GpuNextApi(this.value, this.label, this.desc);
 

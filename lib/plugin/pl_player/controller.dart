@@ -773,8 +773,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
     // 「默认 gpu-next」开启且要求 HDR / 杜比视界切回 MediaCodec：
     // 由系统解码器直接送显，是 Android 上点亮 HDR 面板最稳的路径。
-    // 这条判断必须放在 OpenGL 之前：EGL 没有 HDR 交换链，渲染 API 选了
-    // OpenGL 时只有 MediaCodec 直通才能真正激发 HDR。
+    // 这条判断要放在 OpenGL 之前：即使打了 GL HDR 补丁，MediaCodec 直通
+    // 依然是功耗与兼容性最好的选择，用户勾选它就应该生效。
     if (_defaultGpuNext && Pref.gpuNextHdrMediaCodec && Pref.enableHA) {
       return HdrBackend.mediacodecEmbed;
     }
@@ -782,13 +782,20 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // Android 的 EGL 路径没有 HDR 交换链，画面会被 libplacebo 映射成 SDR，
     // 但兼容性最好，适合 Vulkan 驱动有问题的设备。
     if (_defaultGpuNext && _gpuNextApi == GpuNextApi.opengl) {
+      if (_gpuNextGlUnavailable) {
+        return _useHdrDirectFallback && Pref.enableHA
+            ? HdrBackend.mediacodecEmbed
+            : HdrBackend.gpu;
+      }
       return HdrBackend.gpuNextGl;
     }
     if (_vulkanNextWanted) {
       if (_vulkanVoBlocked) {
         return _useHdrDirectFallback
             ? HdrBackend.mediacodecEmbed
-            : HdrBackend.gpuNextGl;
+            : (_gpuNextGlUnavailable
+                  ? HdrBackend.gpu
+                  : HdrBackend.gpuNextGl);
       }
       return HdrBackend.gpuNext;
     }
@@ -817,6 +824,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 一次后本进程内退回 gpu，避免用户每次都要手动关掉「默认 gpu-next」。
   static bool _gpuNextTextureUnavailable = false;
 
+  /// 原生 Surface 上 gpu-next + OpenGL/EGL 是否已确认不可用。
+  ///
+  /// 这条路径依赖 libmpv 的 GL HDR 补丁（10bit EGLConfig + BT.2020/PQ
+  /// dataspace）；补丁缺失或设备不支持 10bit 窗口缓冲时 VO 建不起来，
+  /// 表现为有声音的黑屏，因此同样要复查 vo-configured 并回退。
+  static bool _gpuNextGlUnavailable = false;
+
   /// 纹理出画路径上 gpu-next Vulkan 是否已确认不可用。
   ///
   /// 纹理没有原生 Surface，Vulkan 交换链创建失败时整块纹理变黑。检测到
@@ -837,9 +851,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// Vulkan 不可用时，HDR 片源是否改走 MediaCodec 直通。
   ///
-  /// gpu-next OpenGL 只会把 HDR tone map 成 SDR，面板不会进入 HDR 模式，
-  /// 用户看到的就是「亮度激发不起来」。MediaCodec 直通由系统解码送显，
-  /// 虽然绕过 libplacebo，但能保留真正的 HDR 亮度与广色域。
+  /// 老版本 libmpv（没有 GL HDR 补丁）上 gpu-next OpenGL 只能把 HDR tone map
+  /// 成 SDR，面板不会进入 HDR 模式，用户看到的就是「亮度激发不起来」。
+  /// MediaCodec 直通由系统解码送显，虽然绕过 libplacebo，但能保留真正的
+  /// HDR 亮度与广色域。
   bool get _useHdrDirectFallback =>
       Pref.enableHA &&
       isHdrSource &&
@@ -864,18 +879,20 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   HdrBackend get _renderBackend =>
       _wantNativeSurface ? _hdrOutputBackend : _textureBackend;
 
-  /// 当前是否走 gpu-next + Vulkan 这条真正的 HDR 交换链。
+  /// 当前是否走 gpu-next，且这条路径能真正把 HDR 交给显示端
+  /// （Vulkan 交换链，或打过 GL HDR 补丁的 Android EGL）。
   ///
-  /// 只有这条路径的窗口色彩模式需要额外照顾：进出全屏会改方向与 SystemUI，
+  /// 只有这两条路径的窗口色彩模式需要额外照顾：进出全屏会改方向与 SystemUI，
   /// 部分 ROM 会顺手复位窗口 HDR 色彩模式（画面发灰、面板不再激发）。
   /// 注意这里**不做** VO 重建：mpv 的 `android_reconfig` 已经会重新
   /// setBuffersGeometry 并重下发 BT.2020/PQ dataspace，重建是多余的，
   /// 而 `vo=null` 会让 mpv 在重建期间报 buffering，全屏切换就闪加载动画。
-  /// mediacodec_embed 由解码器直通，gpu-next-gl / gpu 是 SDR 输出，都不需要。
-  bool get _isVulkanHdrOutput =>
+  /// mediacodec_embed 由解码器直通、gpu 是 SDR 输出，都不需要。
+  bool get _isGpuNextHdrOutput =>
       nativeSurfaceMode.value &&
       !_useMedia3Dovi &&
-      _renderBackend == HdrBackend.gpuNext;
+      _renderBackend.isGpuNext &&
+      _renderBackend.supportsHdrOutput;
 
   /// 原生 SurfaceView 是否申请 10bit 缓冲格式。
   ///
@@ -895,6 +912,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _vulkanFallbackAt = null;
     _gpuNextTextureUnavailable = false;
     _gpuNextVulkanTextureUnavailable = false;
+    _gpuNextGlUnavailable = false;
   }
 
   /// 原生 SurfaceView 出画开关。Rx 以便播放页在出画方式变化时立即重建视频控件。
@@ -1582,8 +1600,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           '${_autoFallbackLabel()}',
       'Vulkan 自动回退: ${_vulkanVoBlocked ? '已触发（跳过 Vulkan，10 分钟后自动重试）' : (_vulkanVoUnavailable ? '冷却已过，下次播放重试 Vulkan' : '未触发')}',
       '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 ? '，profile 5 ${Pref.gpuNextDoviSoft ? '软解' : '硬解拷贝'}，回退方式「${GpuNextDoviFallback.fromValue(Pref.gpuNextDoviFallback).label}」' : ''}）' : '关'}',
-      if (native && _renderBackend.gpuApi == 'vulkan')
-        'Vulkan HDR 窗口: ${read('options/android-vulkan-hdr')}'
+      if (native && _renderBackend.isGpuNext)
+        'HDR 输出选项（android-vulkan-hdr）: ${read('options/android-vulkan-hdr')}'
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
       if (_lastFallbackReason != null) '自动回退原因: $_lastFallbackReason',
       if (_mpvErrorLog.isNotEmpty) 'mpv 错误: ${_mpvErrorLog.last}',
@@ -1880,6 +1898,45 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         );
       },
     );
+  }
+
+  /// gpu-next + OpenGL/EGL 建 VO 后的自检。
+  ///
+  /// 这条路径的 HDR 输出依赖 libmpv 的 GL 补丁：10bit EGLConfig 与
+  /// BT.2020/PQ dataspace。补丁版本不对（App 从 releases/latest 拉 jar，
+  /// 可能先于补丁更新）时 eglCreateWindowSurface 会失败，得到有声音的黑屏。
+  /// 4 秒后复查 vo-configured，仍然不是 yes 就降到 gpu（SDR）。
+  void _scheduleGpuNextGlVoCheck() {
+    _vulkanCheckTimer?.cancel();
+    _vulkanCheckTimer = Timer(const Duration(seconds: 4), () {
+      _vulkanCheckTimer = null;
+      final player = _videoPlayerController;
+      if (player == null) return;
+      if (!nativeSurfaceMode.value || _useMedia3Dovi) return;
+      if (_appliedBackend != HdrBackend.gpuNextGl) return;
+      if (_gpuNextGlUnavailable) return;
+      var configured = '';
+      try {
+        configured = player.getProperty('vo-configured');
+      } catch (_) {}
+      if (configured == 'yes') return;
+      _fallbackFromGpuNextGl('vo-configured="$configured"');
+    });
+  }
+
+  /// gpu-next OpenGL 的 VO 没建起来时降级到 gpu（SDR），避免一直黑屏。
+  void _fallbackFromGpuNextGl(String reason) {
+    if (_gpuNextGlUnavailable) return;
+    _gpuNextGlUnavailable = true;
+    _lastFallbackReason = reason;
+    debugPrint('[HDR] gpu-next OpenGL VO unavailable ($reason)');
+    SmartDialog.showToast('gpu-next OpenGL 输出不可用，已回退到 gpu（SDR）');
+    _vulkanCheckTimer?.cancel();
+    _vulkanCheckTimer = null;
+    _appliedWid = null;
+    _appliedVo = null;
+    _appliedBackend = null;
+    unawaited(_rebuildOutput());
   }
 
   /// 把失败的 Vulkan VO 切到 gpu-next OpenGL。
@@ -2464,6 +2521,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       );
       if (needVo && backend == HdrBackend.gpuNext && player.state.playing) {
         _scheduleVulkanVoCheck();
+      } else if (needVo &&
+          backend == HdrBackend.gpuNextGl &&
+          player.state.playing) {
+        _scheduleGpuNextGlVoCheck();
       }
     } catch (_) {}
   }
@@ -2539,7 +2600,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       );
       final renderBackend = _renderBackend;
       // 纹理出画时同样要写 gpu-next 的渲染参数（libplacebo 的 FBO / 抖动 /
-      // 色域映射）；但纹理没有 HDR 交换链，不能请求 target-colorspace-hint。
+      // 色域映射）；但纹理只有一个 8bit FBO，不能请求 target-colorspace-hint。
       if (hdrSurface || renderBackend.isGpuNext) {
         final backend = renderBackend;
         // 即使不是 gpu-next，也要显式写回 gpu-api/gpu-context：播放器内
@@ -2548,12 +2609,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           properties['gpu-api'] = backend.gpuApi!;
           properties['gpu-context'] = backend.gpuContext!;
         }
-        // 是否让 libmpv 的 Android Vulkan 上下文按 HDR10 输出：fork 里的
-        // androidvk 会据此把 ANativeWindow 切成 BT.2020/PQ + 10bit，并向
-        // libplacebo 声明 preferred_csp，显示端才会真正进入 HDR 模式。
+        // 是否让 libmpv 的 Android 上下文按 HDR10 输出（选项名沿用
+        // android-vulkan-hdr，Vulkan 与 OpenGL/EGL 两套补丁共用它）：
+        // androidvk 会据此把 ANativeWindow 切成 BT.2020/PQ + 10bit，
+        // android GL context 会挑 10bit EGLConfig 并声明同样的 dataspace；
+        // 两者都向 libplacebo 声明 preferred_csp，显示端才会真正进入 HDR。
         properties['options/android-vulkan-hdr'] =
             hdrSurface &&
-                backend.gpuApi == 'vulkan' &&
+                backend.isGpuNext &&
                 isHdrSource &&
                 !isHdrVividSource
             ? 'yes'
@@ -2569,9 +2632,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           if (backend.gpuApi == 'opengl') {
             properties['fbo-format'] = 'rgba16hf';
           }
-          if (hdrSurface && backend.gpuApi == 'vulkan') {
-            // Vulkan 交换链可以协商 HDR 色彩空间；strict 关闭，协商失败
-            // 时仍可回退 SDR，避免整屏发灰/黑屏。
+          if (hdrSurface && backend.supportsHdrOutput) {
+            // Vulkan 交换链可以协商 HDR 色彩空间；OpenGL 走补丁后的
+            // Android EGL（10bit EGLConfig + BT.2020/PQ dataspace）。
+            // strict 关闭，协商失败时仍可回退 SDR，避免整屏发灰/黑屏。
             properties['target-colorspace-hint'] = 'yes';
             properties['target-colorspace-hint-mode'] = 'target';
             properties['target-colorspace-hint-strict'] = 'no';
@@ -2584,8 +2648,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             properties['target-prim'] = 'auto';
             properties['target-trc'] = 'auto';
           } else {
-            // OpenGL/EGL 的 Android 后端没有 HDR 交换链，必须让
-            // libplacebo tone map 回 SDR；请求 HDR hint 会输出错误颜色。
+            // 纹理出画只有一个 8bit FBO，必须让 libplacebo tone map 回
+            // SDR；请求 HDR hint 会输出错误颜色。
             properties['target-colorspace-hint'] = 'no';
           }
           properties['hdr-compute-peak'] = 'yes';
@@ -4180,7 +4244,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 尺寸变化走 android_reconfig，它本来就会重下发 HDR dataspace，不需要
     // 再 vo=null 重建（重建期间 mpv 会报 buffering）。
     _scheduleColorModeTimeline(val);
-    if (_isVulkanHdrOutput) _updateWindowHdrMode(force: true);
+    if (_isGpuNextHdrOutput) _updateWindowHdrMode(force: true);
     // SurfaceView 重建、VO 重新下发期间 mpv 会短暂报 buffering，
     // 过渡窗口（1.2s）内不显示加载动画，避免全屏切换闪一下「加载中」。
     fullScreenTransition.value = true;
@@ -4191,7 +4255,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _fullScreenHdrRepinTimer = Timer(const Duration(milliseconds: 600), () {
       _fullScreenHdrRepinTimer = null;
       if (isFullScreen.value != val) return;
-      if (_isVulkanHdrOutput) _updateWindowHdrMode(force: true);
+      if (_isGpuNextHdrOutput) _updateWindowHdrMode(force: true);
     });
     _fullScreenTransitionTimer = Timer(const Duration(milliseconds: 1200), () {
       _fullScreenTransitionTimer = null;

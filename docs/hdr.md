@@ -403,7 +403,7 @@ BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 RO
 现在的处理（`PlPlayerController`）：
 
 * `_setFullScreen` 在 HDR 直通时（`_isVulkanHdrOutput`，即
-  `nativeSurfaceMode && !_useMedia3Dovi && _renderBackend == gpuNext`）用
+  `nativeSurfaceMode && !_useMedia3Dovi && _renderBackend.isGpuNext`，见 7.8）用
   `_updateWindowHdrMode(force: true)` 重新钉一次窗口色彩模式，并在 600ms 后
   （SurfaceView 重建、尺寸下发完成时）再钉一次——进出全屏的 SystemUI／方向
   切换可能把第一次的钉法冲掉；
@@ -552,6 +552,50 @@ applied=0`、`--- VO 重建 wid=… vo=…`。这些行会拼在「HDR 状态诊
   `mean` 本身就很小 → 是 libplacebo 出的画面就暗。全屏时早先一直只有 `null`，
   现在失败也会回 `error`（owner 不符 / 尺寸为 0 / PixelCopy 返回码）并重试一次。
 
+### 7.8 换路线：gpu-next 走 OpenGL/EGL 输出 10bit BT.2020/PQ
+
+7.6 的 A/B（半分辨率出画）已经把「交换链尺寸」排除掉：降到 1264x632 仍然暗。
+后来从 SurfaceFlinger 的 `dumpsys` 里拿到了决定性证据：
+
+| 后端 | 视频层格式 | dataspace | transform | 合成方式 |
+| --- | --- | --- | --- | --- |
+| mediacodec_embed（正常） | `Y_CBCR_420_TP10_UBWC` | `BT2020_PQ` | 90 | `DEVICE/DEVICE` |
+| gpu-next Vulkan（全黑） | `RGBA_1010102`（modifier 0、`compressed: false`） | `BT2020_PQ` | 90 | `DEVICE/CLIENT` |
+
+也就是说**不是 10bit/PQ 的问题**：直通路径的 10bit PQ 图层带 90° 旋转照样交给 HWC。
+差别在压缩：Vulkan WSI 拿到的是**线性**缓冲，需要旋转时 SF 没法让 HWC 直接搬，只能退回
+CLIENT（GPU/RenderEngine）合成，PQ 被画进 SDR 的 client target
+（`mDataspace=DCI-P3 sRGB Full range`），RenderEngine 又不做色调映射 → 几乎全黑。
+半屏时不需要旋转，线性缓冲也能 DEVICE，所以一切正常。
+
+路线 B 就是让 gpu-next 换一条能拿到**压缩缓冲**的出画路径：Android 的 EGL 窗口缓冲来自
+gralloc、是 UBWC 压缩的（早先 gpu-next(OpenGL) 的 dump 里就是 `RGBX_8888_UBWC`，只是
+8bit SDR）。于是给 libmpv 打补丁，让这条路径也输出 10bit BT.2020/PQ：
+
+* libplacebo（`buildscripts/patches/libplacebo/android-gl-hdr.patch`）：OpenGL 交换链补
+  `colorspace_hint`，`gl_sw_start_frame` 不再写死 `pl_color_space_monitor`，改用调用方
+  （`vo_gpu_next`）给的色彩空间；
+* mpv（`buildscripts/patches/mpv/android-gl-hdr.patch`）：`video/out/opengl/context_android.c`
+  在 HDR 时用 `refine_config` 挑 10bit 的 EGLConfig、把窗口 dataspace 声明成
+  `ADATASPACE_BT2020_PQ`（`ANativeWindow_setBuffersGeometry` 会复位 dataspace，所以 init 与
+  每次 `android_reconfig` 之后都要重发），并给 `ra_ctx_params.preferred_csp` 返回
+  `pl_color_space_hdr10`。两个补丁都用 `--android-vulkan-hdr` 这个选项做开关。
+
+App 侧配套（`lib/plugin/pl_player/`）：
+
+* `HdrBackend.gpuNextGl` 也算 `supportsHdrOutput`，窗口 HDR 色彩模式与
+  `target-colorspace-hint` 都按 HDR 处理；
+* `_applyHdrProperties` 里 `options/android-vulkan-hdr` 对 `gpu-api=opengl`（gpu-next）
+  也置 `yes`，`target-colorspace-hint` 在「gpu-next + 原生 Surface + HDR 片源」时置 `yes`；
+* `_scheduleGpuNextGlVoCheck()`：4 秒后复查 `vo-configured`，仍不是 `yes` 就说明这条
+  libmpv 没有对应补丁（或设备不支持 10bit 窗口缓冲），降级到 `gpu`（SDR）并提示，
+  避免停在「有声音的黑屏」；`_gpuNextGlUnavailable` 在进程内记住，切后端时复位。
+
+怎么试：设置 → HDR / 杜比视界 →「默认 gpu-next」开、渲染 API 选 **OpenGL**，并把
+「HDR / 杜比视界切回 MediaCodec」关掉（它优先级更高，开着就永远走直通）。
+然后全屏看「HDR 状态诊断」：`后端: gpu-next (opengl)`、`VO 输出色彩: bt.2020 / pq`、
+`HDR 输出选项（android-vulkan-hdr）: yes`，再对比 SurfaceFlinger dump 里视频层是否变成
+`DEVICE/DEVICE`。
 ## 八、代码位置
 
 | 文件 | 作用 |
@@ -569,7 +613,7 @@ applied=0`、`--- VO 重建 wid=… vo=…`。这些行会拼在「HDR 状态诊
 | `lib/services/pip_overlay_service.dart` | 小窗/系统 PiP 的透明底色适配 |
 | `lib/utils/video_utils.dart` | 杜比视界兼容模式的选质回退 |
 | `third_party/media_kit_video` | 仅保留 `androidExternalSurface`（不创建纹理，由应用提供 Surface）；注意它会覆盖 `gpu-context` |
-| `third_party/libmpv-android-video-build` | libmpv / libplacebo 带 Vulkan 的构建 fork（`androidvk` 上下文、构建矩阵） |
+| `third_party/libmpv-android-video-build` | libmpv / libplacebo 构建 fork（`androidvk` 上下文、构建矩阵；GL HDR 补丁见 7.8） |
 
 ## 九、自测建议
 
