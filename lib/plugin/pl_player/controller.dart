@@ -1361,6 +1361,31 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     return api == 'vulkan' ? 'Vulkan' : 'OpenGL';
   }
 
+  /// 「播放信息」里展示的实际出画方式。
+  ///
+  /// Media3 出画时 mpv 的视频轨是关掉的（`vid=no`），`hwdec-current` 与
+  /// `current-vo` 都是空值，直接读会让用户以为播放器没有在出画。
+  String get infoHwdecLabel {
+    if (_useMedia3Dovi) {
+      return 'mediacodec（Media3 / ExoPlayer 解码，mpv 不解视频）';
+    }
+    final player = _videoPlayerController;
+    if (player == null) return '-';
+    try {
+      final current = player.getProperty('hwdec-current');
+      return current.isEmpty ? 'no（未开启硬解）' : current;
+    } catch (_) {
+      return '-';
+    }
+  }
+
+  /// 同上：Media3 出画时 mpv 没有真正的 vo，按控制器实际下发的后端显示。
+  String get infoVoLabel {
+    final vo = _renderBackend.vo;
+    final api = _voApiLabel();
+    return api.isEmpty ? vo : '$vo（$api）';
+  }
+
   String get hdrDebugInfo {
     final player = _videoPlayerController;
     if (player == null) return lastHdrInfo;

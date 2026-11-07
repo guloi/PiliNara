@@ -926,8 +926,13 @@ class HeaderControlState extends State<HeaderControl>
     BuildContext context, {
     required NativePlayer player,
   }) {
-    final hwdec = player.getProperty('hwdec-current');
-    final vo = player.getProperty('current-vo');
+    // Media3 出画时 mpv 的视频轨是关掉的（vid=no），hwdec-current 与
+    // current-vo 都会是空值，此时按控制器实际下发的后端显示，
+    // 否则「播放信息」里看起来像播放器没有在出画。
+    final controller = PlPlayerController.instance;
+    final hwdec =
+        controller?.infoHwdecLabel ?? player.getProperty('hwdec-current');
+    final vo = controller?.infoVoLabel ?? player.getProperty('current-vo');
     final volume =
         '${(double.tryParse(player.getProperty('volume')) ?? 0).toStringAsFixed(1)}%';
     showDialog(
