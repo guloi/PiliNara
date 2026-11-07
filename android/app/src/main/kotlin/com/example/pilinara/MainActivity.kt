@@ -103,14 +103,33 @@ class MainActivity : AudioServiceActivity() {
         return builder.toString()
     }
 
-    /** Window.colorMode 的可读名字，避免在 Dart 侧硬编码常量表。 */
-    private fun colorModeLabel(mode: Int): String = when (mode) {
-        ActivityInfo.COLOR_MODE_DEFAULT -> "默认"
-        ActivityInfo.COLOR_MODE_BROADCAST -> "广播"
-        ActivityInfo.COLOR_MODE_GAME -> "游戏"
-        ActivityInfo.COLOR_MODE_HDR -> "HDR"
-        ActivityInfo.COLOR_MODE_AUTO -> "自动"
-        else -> "未知"
+    /**
+     * Window.colorMode 的可读名字，避免在 Dart 侧硬编码常量表。
+     *
+     * 公开 SDK 里只剩 `COLOR_MODE_DEFAULT` 与 `COLOR_MODE_HDR` 两个常量：
+     * `COLOR_MODE_BROADCAST` / `COLOR_MODE_GAME` / `COLOR_MODE_AUTO` 是 @SystemApi，
+     * 编译期不可见（直接引用会 Unresolved reference）。这些字段在运行期确实存在于
+     * ActivityInfo 上，所以按字段名反射取值再和当前 mode 比对，取不到就退回数字。
+     */
+    private fun colorModeLabel(mode: Int): String {
+        when (mode) {
+            ActivityInfo.COLOR_MODE_DEFAULT -> return "默认"
+            ActivityInfo.COLOR_MODE_HDR -> return "HDR"
+        }
+        val systemModes = mapOf(
+            "COLOR_MODE_BROADCAST" to "广播",
+            "COLOR_MODE_GAME" to "游戏",
+            "COLOR_MODE_AUTO" to "自动",
+        )
+        for ((field, label) in systemModes) {
+            val value = try {
+                ActivityInfo::class.java.getField(field).getInt(null)
+            } catch (_: Throwable) {
+                -1
+            }
+            if (value == mode) return label
+        }
+        return "其它($mode)"
     }
 
     /**
