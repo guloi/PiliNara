@@ -248,7 +248,7 @@ class VideoSurfaceHost(
             result.success(mapOf("error" to "alloc ${sv.width}x${sv.height}: ${t.message}"))
             return
         }
-        val listener = PixelCopy.OnPixelCopyFinishedListener { copyResult ->
+        fun finish(copyResult: Int) {
             if (copyResult != PixelCopy.SUCCESS) {
                 Log.w(TAG, "probe: PixelCopy failed with $copyResult")
                 bitmap.recycle()
@@ -301,6 +301,26 @@ class VideoSurfaceHost(
                     mainHandler.post { result.success(data) }
                 }.apply { isDaemon = true }.start()
             }
+        }
+        var retriedSource = false
+        val listener = PixelCopy.OnPixelCopyFinishedListener { copyResult ->
+            // 全屏时 SurfaceView 重载会稳定回 ERROR_SOURCE_INVALID(3)：窗口旋转/重排
+            // 之后它不再认这个 SurfaceView（半屏用同一份代码是好的）。这时改用它
+            // 自己的 Surface 再拷一次——这是拿到「全屏时 Surface 本身亮不亮」的唯一途径。
+            if (copyResult == PixelCopy.ERROR_SOURCE_INVALID && !retriedSource) {
+                val surface = sv.holder.surface
+                if (surface != null && surface.isValid) {
+                    retriedSource = true
+                    PixelCopy.request(
+                        surface,
+                        bitmap,
+                        PixelCopy.OnPixelCopyFinishedListener { r2 -> finish(r2) },
+                        mainHandler,
+                    )
+                    return@OnPixelCopyFinishedListener
+                }
+            }
+            finish(copyResult)
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
