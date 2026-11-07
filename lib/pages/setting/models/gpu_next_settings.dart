@@ -46,12 +46,28 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
       if (Pref.defaultGpuNext)
         SwitchModel(
           title: 'HDR / 杜比视界时切回 MediaCodec',
-          subtitle: api == GpuNextApi.opengl
+          subtitle: Pref.gpuNextSplitHdr
+              ? '下面的分流开关已开启：HDR / 杜比视界固定走 gpu-next OpenGL，这里不再生效。'
+              : api == GpuNextApi.opengl
               ? '建议保持开启，否则 HDR / 杜比视界会被映射成 SDR。'
               : '开启后 HDR / 杜比视界走 MediaCodec 直通，SDR 走 gpu-next。',
           leading: const Icon(Icons.hdr_on),
           setKey: SettingBoxKey.gpuNextHdrMediaCodec,
           defaultVal: true,
+          onChanged: (_) {
+            PlPlayerController.instance?.applyHdrOptions();
+            setState(() {});
+          },
+        ),
+      if (Pref.defaultGpuNext)
+        SwitchModel(
+          title: 'SDR 走 Vulkan，HDR / 杜比视界走 OpenGL',
+          subtitle:
+              'Vulkan 在 Android 上只拿得到线性缓冲，全屏 / 横屏旋转 10bit 图层时会被系统退回 GPU 合成，画面发暗；'
+              'EGL 走 gralloc（UBWC），HWC 能直接合成。开启后按片源分流，重新加载视频后生效。',
+          leading: const Icon(Icons.compare_arrows),
+          setKey: SettingBoxKey.gpuNextSplitHdr,
+          defaultVal: false,
           onChanged: (_) {
             PlPlayerController.instance?.applyHdrOptions();
             setState(() {});

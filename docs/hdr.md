@@ -599,6 +599,12 @@ sRGB，PQ 数据就被当 SDR 解释（黑位抬起来、对比度差）。所�
 并打 warn。日志级别调到 `v` 时能看到 `Android/EGL: 面色彩空间 = BT.2020/PQ` 或
 `Android/EGL: 指定 BT.2020/PQ 色彩空间失败，退回默认`。
 
+设置里还有一个分流开关（`gpuNextSplitHdr`，默认关）：**SDR 走 Vulkan，HDR / 杜比视界走 OpenGL**。
+它把「渲染 API」这个二选一变成按片源决定——SDR 不需要 10bit 交换链，留在 Vulkan 最省事；
+HDR / 杜比视界走 EGL 才不会被旋转拖进 CLIENT 合成。开启后 `_hdrOutputBackend` 直接返回
+`gpuNextGl`（profile 5 关了软解仍按原意交给 MediaCodec），`_textureBackend` 固定走 Vulkan，
+并且优先于「HDR / 杜比视界时切回 MediaCodec」。gpu-next OpenGL 判定不可用（`_gpuNextGlUnavailable`）时
+按「能否直通」退到 `mediacodecEmbed` 或 `gpu`。
 怎么试：设置 → HDR / 杜比视界 →「默认 gpu-next」开、渲染 API 选 **OpenGL**，并把
 「HDR / 杜比视界切回 MediaCodec」关掉（它优先级更高，开着就永远走直通）。
 然后全屏看「HDR 状态诊断」：`后端: gpu-next (opengl)`、`VO 输出色彩: bt.2020 / pq`、

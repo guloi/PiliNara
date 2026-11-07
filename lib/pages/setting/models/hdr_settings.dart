@@ -96,8 +96,8 @@ List<SettingsModel> get hdrSettings => [
       if (Pref.defaultGpuNext) {
         final api = GpuNextApi.fromValue(Pref.gpuNextApi);
         return '当前：${backend.label}。已开启「默认 gpu-next」（渲染 API：'
-            '${api.label}）：'
-            '${Pref.gpuNextHdrMediaCodec ? 'HDR / 杜比视界会切回 MediaCodec 直通，' : ''}'
+            '${Pref.gpuNextSplitHdr ? 'SDR Vulkan / HDR OpenGL 分流' : api.label}）：'
+            '${Pref.gpuNextSplitHdr ? 'HDR / 杜比视界固定走 gpu-next OpenGL，' : (Pref.gpuNextHdrMediaCodec ? 'HDR / 杜比视界会切回 MediaCodec 直通，' : '')}'
             '此项只在关闭「默认 gpu-next」后生效。';
       }
       return '当前：${backend.label}。${backend.desc}';

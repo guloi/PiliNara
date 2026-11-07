@@ -1398,6 +1398,14 @@ abstract final class Pref {
   static String get gpuNextApi =>
       _setting.get(SettingBoxKey.gpuNextApi, defaultValue: 'auto');
 
+  /// 按片源分流渲染 API：SDR 走 Vulkan，HDR / 杜比视界走 OpenGL。
+  ///
+  /// Vulkan 交换链在 Android 上只能拿到线性缓冲，全屏/横屏需要旋转 10bit
+  /// 图层时 HWC 合成不了，画面会被 SDR 化（变暗）；EGL 走 gralloc/UBWC 没
+  /// 这个问题。SDR 不需要 10bit HDR，留在 Vulkan 更省事，于是按片源分流。
+  static bool get gpuNextSplitHdr =>
+      _setting.get(SettingBoxKey.gpuNextSplitHdr, defaultValue: false);
+
   /// gpu-next 播放杜比视界 profile 5 时改用软解，保留 RPU 元数据。
   static bool get gpuNextDoviSoft =>
       _setting.get(SettingBoxKey.gpuNextDoviSoft, defaultValue: true);

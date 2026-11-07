@@ -725,6 +725,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 「默认 gpu-next」使用的渲染 API：自动 / Vulkan / OpenGL。
   GpuNextApi get _gpuNextApi => GpuNextApi.fromValue(Pref.gpuNextApi);
 
+  /// 「默认 gpu-next」是否按片源分流渲染 API：SDR → Vulkan，HDR / 杜比视界 → OpenGL。
+  ///
+  /// Vulkan 交换链在 Android 上只拿得到线性缓冲，全屏 / 横屏时 10bit HDR 图层
+  /// 要旋转，HWC 合成不了就退回 GPU 合成，PQ 被画进 SDR 的 client target（变暗）；
+  /// EGL 的窗口缓冲来自 gralloc（UBWC），HWC 能直接合成，所以 HDR 交给
+  /// gpu-next OpenGL，SDR 留在 Vulkan（SDR 不需要 10bit 交换链）。
+  bool get _splitHdrAcrossBackends => _defaultGpuNext && Pref.gpuNextSplitHdr;
+
   /// 是否希望片源走 gpu-next（Vulkan）。
   ///
   /// 开启「默认 gpu-next」后，HDR / 杜比视界是否仍交给 MediaCodec 由子开关
@@ -744,6 +752,20 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// HDR / 杜比视界片源实际使用的出画后端。
   HdrBackend get _hdrOutputBackend {
+    // 按片源分流：HDR / 杜比视界固定走 gpu-next OpenGL。这条优先于
+    // 「HDR / 杜比视界时切回 MediaCodec」——用户显式要求 HDR 留在 gpu-next。
+    // profile 5 关了软解仍按原意交给 MediaCodec（拿不到 RPU 会偏色）。
+    if (_splitHdrAcrossBackends) {
+      if (isDolbyVisionProfile5 && !Pref.gpuNextDoviSoft && Pref.enableHA) {
+        return HdrBackend.mediacodecEmbed;
+      }
+      if (_gpuNextGlUnavailable) {
+        return _useHdrDirectFallback && Pref.enableHA
+            ? HdrBackend.mediacodecEmbed
+            : HdrBackend.gpu;
+      }
+      return HdrBackend.gpuNextGl;
+    }
     // 杜比视界 profile 5 例外：色彩是 IPTPQc2，必须由 libplacebo 用 RPU
     // 元数据还原。MediaCodec（直通或拷贝）都拿不到解码器解析出的 DoVi
     // 元数据，交给它出画会整片偏色（发绿 / 发紫），所以这类片源不跟随
@@ -867,8 +889,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   ///
   /// 开启「默认 gpu-next」后 SDR 也交给 libplacebo：默认走 gpu-next OpenGL
   /// 纹理；渲染 API 选 Vulkan 时改用 Vulkan 纹理，失败后回退 OpenGL。
+  /// 开了「SDR 走 Vulkan / HDR 走 OpenGL」的分流开关后，SDR 固定走 Vulkan。
   HdrBackend get _textureBackend {
     if (!_defaultGpuNext || _gpuNextTextureUnavailable) return HdrBackend.gpu;
+    if (_splitHdrAcrossBackends) {
+      return _gpuNextVulkanTextureUnavailable
+          ? HdrBackend.gpuNextGl
+          : HdrBackend.gpuNext;
+    }
     if (_gpuNextApi == GpuNextApi.vulkan && !_gpuNextVulkanTextureUnavailable) {
       return HdrBackend.gpuNext;
     }
@@ -1599,7 +1627,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           '后端: ${_renderBackend.label} (${_renderBackend.gpuApi ?? '-'})'
           '${_autoFallbackLabel()}',
       'Vulkan 自动回退: ${_vulkanVoBlocked ? '已触发（跳过 Vulkan，10 分钟后自动重试）' : (_vulkanVoUnavailable ? '冷却已过，下次播放重试 Vulkan' : '未触发')}',
-      '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_gpuNextApi.label}，HDR / 杜比视界${Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next'}${isDolbyVisionProfile5 ? '，profile 5 ${Pref.gpuNextDoviSoft ? '软解' : '硬解拷贝'}，回退方式「${GpuNextDoviFallback.fromValue(Pref.gpuNextDoviFallback).label}」' : ''}）' : '关'}',
+      '默认 gpu-next: ${_defaultGpuNext ? '开（渲染 API ${_splitHdrAcrossBackends ? '按片源分流：SDR Vulkan / HDR OpenGL' : _gpuNextApi.label}，HDR / 杜比视界${_splitHdrAcrossBackends ? '用 gpu-next OpenGL' : (Pref.gpuNextHdrMediaCodec ? '切回 MediaCodec' : '也用 gpu-next')}${isDolbyVisionProfile5 ? '，profile 5 ${Pref.gpuNextDoviSoft ? '软解' : '硬解拷贝'}，回退方式「${GpuNextDoviFallback.fromValue(Pref.gpuNextDoviFallback).label}」' : ''}）' : '关'}',
       if (native && _renderBackend.isGpuNext)
         'HDR 输出选项（android-vulkan-hdr）: ${read('options/android-vulkan-hdr')}'
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
