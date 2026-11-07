@@ -186,20 +186,28 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
     }
   }
 
-  void _getSystemBrightness() {
-    ScreenBrightnessPlatform.instance.system.then((res) {
-      if (mounted) {
-        _brightnessValue.value = res;
-      }
-    });
-  }
+  void _getSystemBrightness() => _readBrightness(
+    () => ScreenBrightnessPlatform.instance.system,
+  );
 
-  void _getAppBrightness() {
-    ScreenBrightnessPlatform.instance.application.then((res) {
-      if (mounted) {
-        _brightnessValue.value = res;
+  void _getAppBrightness() => _readBrightness(
+    () => ScreenBrightnessPlatform.instance.application,
+  );
+
+  /// 读取亮度失败时把刻度兜底到 1.0：否则 [_brightnessValue] 会一直停在 0，
+  /// 上滑只能从 0 往上爬几个百分点，看起来就是"亮度手势没反应"。
+  Future<void> _readBrightness(Future<double> Function() read) async {
+    try {
+      final res = await read();
+      if (mounted && res >= 0) {
+        _brightnessValue.value = res.clamp(0.0, 1.0);
       }
-    });
+    } catch (e) {
+      debugPrint('read brightness failed: $e');
+      if (mounted && _brightnessValue.value <= 0) {
+        _brightnessValue.value = 1.0;
+      }
+    }
   }
 
   void _onVolumeChanged(double value) {
