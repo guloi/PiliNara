@@ -1517,6 +1517,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'target-peak: ${read('target-peak')}',
       'target-colorspace-hint: ${read('target-colorspace-hint')}',
       'target-prim/target-trc: ${read('target-prim')} / ${read('target-trc')}',
+      // video-out-params 是 libplacebo 实际出画的色彩空间：gamma=pq 且
+      // primaries=bt.2020 才是真的把 HDR 交给交换链；若是 bt.1886/bt.709
+      // 就是被 tone map 回了 SDR（画面会偏灰偏暗）。
+      'VO 输出色彩: ${read('video-out-params/primaries')} / '
+          '${read('video-out-params/gamma')} / '
+          '${read('video-out-params/colorlevels')}',
+      'VO 输出尺寸: ${read('video-out-params/w')}x${read('video-out-params/h')}'
+          '（交换链分辨率）',
       '窗口 HDR 预切: ${_windowHdrRequested ? '是' : '否'} / '
           '实际 colorMode=${_windowHdrColorMode ?? '-'}（4=HDR，0=默认）',
       if (_displayHdrInfo != null) _displayHdrLabel(_displayHdrInfo!),
@@ -1570,6 +1578,25 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       _fullScreenSnapshotTimer = null;
       if (_videoPlayerController == null) return;
       unawaited(() async {
+        // 先把「全屏稳定后 libplacebo 实际按什么色彩空间出画」记进时间线，
+        // 半屏/全屏各一条，方便对照交换链有没有在这次尺寸变化里掉档。
+        final player = _videoPlayerController;
+        if (player != null) {
+          String readOut(String key) {
+            try {
+              final value = player.getProperty(key);
+              return value.isEmpty ? '-' : value;
+            } catch (_) {
+              return '-';
+            }
+          }
+
+          _noteVoLog(
+            '--- vo-out ${readOut('video-out-params/primaries')}/'
+            '${readOut('video-out-params/gamma')} '
+            '${readOut('video-out-params/w')}x${readOut('video-out-params/h')}',
+          );
+        }
         await _probeNativeSurface();
         if (_videoPlayerController == null) return;
         await _verifyFullScreenHdr();
@@ -2798,7 +2825,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final hwdec = _resolveHwdec();
     final player = await Player.create(
       configuration: PlayerConfiguration(
-        logLevel: kDebugMode ? .warn : .error,
+        // 临时调成 info：libplacebo 建交换链时的
+        // 「Available surface configurations / Picked surface configuration」
+        // 是 info 级，只有放开日志才拿得到，用来判断全屏后交换链有没有
+        // 掉回 8bit/SDR（见 docs/hdr.md 7.5）。定位完改回
+        // kDebugMode ? .warn : .error。
+        logLevel: .info,
         options: opt,
       ),
     );

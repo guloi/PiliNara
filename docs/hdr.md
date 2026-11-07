@@ -462,6 +462,15 @@ libplacebo 色调映射目标偏低）在应用侧看不出来，只能靠 libpl
   `格式 + 色彩空间`（有没有 10bit、有没有 `HDR10_ST2084`）；
 * info 级 `Picked surface configuration N: <format> + <colorspace>` 是最终选中的那个。
 
+mpv 客户端的日志级别由 `PlayerConfiguration.logLevel` 决定（默认 release 是
+`error`），info 级的这两行**默认收不到**。诊断期间先把它调成 `info`
+（见 `controller.dart` 里 `Player.create` 的临时注释），定位完再改回
+`kDebugMode ? .warn : .error`。
+
+另一条更省事的判据是 mpv 的 `video-out-params`（诊断里的「VO 输出色彩」）：
+它就是 libplacebo 实际出画的色彩空间，`pq` + `bt.2020` 说明 HDR 确实交给了
+交换链；若变成 `bt.1886` / `bt.709`，说明被 tone map 回了 SDR。
+
 `PlPlayerController._mpvVoLog` 把 `vo*` / `vulkan*` 前缀、含
 swapchain / color / hdr / dataspace / reconfig / resize / format 的日志（**不限
 level**，因为面配置是 info 级）留最近 20 条，并把应用侧动作也插进去做时间线：
