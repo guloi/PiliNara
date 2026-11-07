@@ -1550,7 +1550,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
       if (_lastFallbackReason != null) '自动回退原因: $_lastFallbackReason',
       if (_mpvErrorLog.isNotEmpty) 'mpv 错误: ${_mpvErrorLog.last}',
-      'mpv 日志: 要求 verbose，已收到 '
+      'mpv 日志: 要求 v，已收到 '
           '${_mpvLogLevelCounts.entries.map((e) => '${e.key}=${e.value}').join(' ')}',
       if (_mpvVoLog.isNotEmpty)
         'mpv VO 日志（最近 ${_mpvVoLog.length} 条，--- 开头是应用侧动作）:\n'
@@ -2834,10 +2834,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       configuration: PlayerConfiguration(
         // 临时调成 verbose：libplacebo 建交换链时打的
         // 「Available surface configurations / Picked surface configuration」
-        // 在 mpv 里至少在 info 以上（实测 info 收不到，故放到 verbose），
+        // 在 mpv 里至少在 info 以上（实测 info 收不到，故放到 v），
         // 是判断全屏后交换链有没有掉回 8bit/SDR 的唯一证据。
         // 见 docs/hdr.md 7.5；定位完改回 kDebugMode ? .warn : .error。
-        logLevel: .verbose,
+        logLevel: .v,
         options: opt,
       ),
     );
