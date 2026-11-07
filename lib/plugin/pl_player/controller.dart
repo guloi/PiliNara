@@ -220,6 +220,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 正在重建播放器，避免回退逻辑重入。
   bool _rebuildingOutput = false;
 
+  /// 片源代次：每加载一次新片源 +1。
+  ///
+  /// 自动回退会销毁播放器再重新打开同一片源，如果这期间用户换了分P / 换集，
+  /// 那次重建必须作废，否则会把刚切走的分P又打开一遍。
+  int _sourceGeneration = 0;
+
   Timer? _timer;
   StreamSubscription? _subForSeek;
 
@@ -2244,8 +2250,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }) async {
     try {
       _processing = true;
+      _sourceGeneration++;
       // 新片源前先释放旧的 Media3 DoVi 播放器。
       _releaseDoviPlayer();
+      // 换 P、换集、换清晰度都是一次新的 setDataSource：清掉上一部分源
+      // 留下的 Vulkan 回退记忆，让这一部分重新尝试 Vulkan。播放器重建
+      // （_rebuildOutput）本身不清，否则会陷入「回退 → 重建 → 再回退」的循环。
+      if (!_rebuildingOutput) resetVulkanFallback();
       // 「默认 gpu-next」等开关会改变实际出画后端，Media3 DoVi 的判定
       // 必须按真正要用的后端来算，否则 gpu-next 明明支持 DoVi 却仍走 ExoPlayer。
       final backend = _hdrOutputBackend;
@@ -2642,6 +2653,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final player = _videoPlayerController;
     if (reload == null || player == null) return;
     _rebuildingOutput = true;
+    final generation = _sourceGeneration;
     final seekTo = player.state.position;
     final wasPlaying = player.state.playing;
     debugPrint('[HDR] rebuild player for new output backend');
@@ -2656,6 +2668,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       try {
         await player.dispose();
       } catch (_) {}
+      if (generation != _sourceGeneration) {
+        // 这期间已经切了分P / 换集，旧片源的重建作废。
+        debugPrint('[HDR] skip rebuild: source changed');
+        return;
+      }
       await reload(seekTo, wasPlaying);
     } catch (e) {
       debugPrint('[HDR] rebuild player failed: ${e}');
@@ -4295,6 +4312,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     nativeSurfaceMode.value = false;
     _resetNativeSurfaceState();
     _setVideoController(null);
+    _sourceGeneration++;
     _videoPlayerController?.dispose();
     _videoPlayerController = null;
     _activeVideoContextKey = null;
