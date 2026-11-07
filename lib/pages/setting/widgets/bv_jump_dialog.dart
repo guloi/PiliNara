@@ -122,7 +122,7 @@ class _BvSwitchDialogState extends State<_BvSwitchDialog> {
                     subtitle: '允许跳转av号',
                     setKey: SettingBoxKey.allowAv,
                     defaultVal: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 24),
+                    contentPadding: EdgeInsetsGeometry.symmetric(horizontal: 24),
                   ),
                   SetSwitchItem(
                     title: '每次启动时跳转',
