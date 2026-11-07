@@ -86,7 +86,7 @@ class VideoReplyController extends ReplyController<MainListReply>
   }
 
   @override
-  Future<LoadingState<MainListReply>> fetchData() => ReplyGrpc.mainList(
+  Future<LoadingState<MainListReply>> customGetData() => ReplyGrpc.mainList(
     oid: oid,
     rpid: rootRpId,
     type: replyType,

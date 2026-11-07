@@ -138,38 +138,6 @@ abstract class ReplyController<R> extends CommonListController<R, ReplyInfo> {
   @override
   bool get endIfNullOrEmpty => false;
 
-  /// 热门排序在部分视频上会退化：服务端只返回极少几条就直接标记结束，
-  /// 这时自动切回最新排序再取一次，避免热门评论看起来「加载不出来」。
-  bool _hotSortFallback = false;
-
-  /// 楼中楼等列表不参与热门退化的自动切换
-  bool get allowHotSortFallback => true;
-
-  Future<LoadingState<R>> fetchData();
-
-  @override
-  Future<LoadingState<R>> customGetData() async {
-    final res = await fetchData();
-    if (!allowHotSortFallback ||
-        _hotSortFallback ||
-        page > 1 ||
-        mode != Mode.MAIN_LIST_HOT) {
-      return res;
-    }
-    if (res case Success(response: final MainListReply data)) {
-      // 正常的热门首屏有十几条；只剩几条说明服务端热门池退化
-      if (data.replies.length < 4 && data.subjectControl.count.toInt() >= 10) {
-        _hotSortFallback = true;
-        sortType.value = ReplySortType.time;
-        mode = Mode.MAIN_LIST_TIME;
-        nextOffset = null;
-        SmartDialog.showToast('热门评论较少，已切换到最新排序');
-        return fetchData();
-      }
-    }
-    return res;
-  }
-
   @override
   void checkIsEnd(int length) {
     final count = this.count.value;

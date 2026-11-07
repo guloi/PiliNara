@@ -29,7 +29,7 @@ class MainReplyController extends ReplyController<MainListReply>
   }
 
   @override
-  Future<LoadingState<MainListReply>> fetchData() => ReplyGrpc.mainList(
+  Future<LoadingState<MainListReply>> customGetData() => ReplyGrpc.mainList(
     type: replyType,
     oid: oid,
     mode: mode,

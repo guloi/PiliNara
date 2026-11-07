@@ -38,7 +38,7 @@ abstract class CommonDynController extends ReplyController<MainListReply>
   late final showDynActionBar = Pref.showDynActionBar;
 
   @override
-  Future<LoadingState<MainListReply>> fetchData() => ReplyGrpc.mainList(
+  Future<LoadingState<MainListReply>> customGetData() => ReplyGrpc.mainList(
     type: replyType,
     oid: oid,
     rpid: rootRpId,

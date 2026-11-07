@@ -128,10 +128,7 @@ class VideoReplyReplyController extends ReplyController
   }
 
   @override
-  bool get allowHotSortFallback => false;
-
-  @override
-  Future<LoadingState> fetchData() => dialog != null
+  Future<LoadingState> customGetData() => dialog != null
       ? ReplyGrpc.dialogList(
           type: replyType,
           oid: oid,
