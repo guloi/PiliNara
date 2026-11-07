@@ -227,12 +227,12 @@ abstract final class SettingBoxKey {
       enableDocProvider = 'enableDocProvider',
       enableEmoteTooltip = 'enableEmoteTooltip',
       mineTabs = 'mineTabs',
+      descNumberTabs = 'descNumberTabs',
       buvid = 'buvid',
       blockAtOnlyReply = 'blockAtOnlyReply',
       blockReplyAtCount = 'blockReplyAtCount',
       filterIntro = 'filterIntro',
-      showRefreshFAB = 'showRefreshFAB',
-      hideAvNumber = 'hideAvNumber';
+      showRefreshFAB = 'showRefreshFAB';
 
   static const String enableAiChat = 'enableAiChat',
       aiApiUrl = 'aiApiUrl',

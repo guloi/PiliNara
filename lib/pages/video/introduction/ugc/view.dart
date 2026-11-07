@@ -14,6 +14,7 @@ import 'package:PiliPlus/common/widgets/selection_text.dart';
 import 'package:PiliPlus/common/widgets/stat/stat.dart';
 import 'package:PiliPlus/common/widgets/translucent_column.dart';
 import 'package:PiliPlus/http/sponsor_block.dart';
+import 'package:PiliPlus/models/common/desc_number_tab_type.dart';
 import 'package:PiliPlus/models_new/video/video_ai_conclusion/model_result.dart';
 import 'package:PiliPlus/models_new/video/video_detail/data.dart';
 import 'package:PiliPlus/models_new/video/video_detail/desc_v2.dart';
@@ -271,46 +272,52 @@ class _UgcIntroPanelState extends State<UgcIntroPanel> {
     );
   }
 
-  List<Widget> _infos(VideoDetailData videoDetail) => [
-    const SizedBox(height: 8, width: .infinity),
-    Row(
-      spacing: 12,
-      mainAxisSize: .min,
-      children: [
-        GestureDetector(
-          onTap: () => Utils.copyText(introController.bvid),
-          child: Text(
-            introController.bvid,
-            style: TextStyle(fontSize: 14, color: colorScheme.secondary),
-          ),
+  List<Widget> _infos(VideoDetailData videoDetail) {
+    // 按设置里勾选的顺序显示 bv / av 号；两个都不勾就整行不占位置。
+    final numbers = [
+      for (final tab in Pref.descNumberTabs)
+        tab == DescNumberType.bv
+            ? introController.bvid
+            : 'av${introController.aid}',
+    ];
+    return [
+      const SizedBox(height: 8, width: .infinity),
+      if (numbers.isNotEmpty)
+        Row(
+          spacing: 12,
+          mainAxisSize: .min,
+          children: [
+            for (final text in numbers)
+              GestureDetector(
+                onTap: () => Utils.copyText(text),
+                child: Text(
+                  text,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: colorScheme.secondary,
+                  ),
+                ),
+              ),
+          ],
         ),
-        if (!Pref.hideAvNumber)
-          GestureDetector(
-            onTap: () => Utils.copyText('av${introController.aid}'),
-            child: Text(
-              'av${introController.aid}',
-              style: TextStyle(fontSize: 14, color: colorScheme.secondary),
-            ),
-          ),
+      if (videoDetail.descV2 case final descV2? when descV2.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        SelectionText.rich(
+          buildDesc(descV2),
+          style: const TextStyle(height: 1.4),
+        ),
       ],
-    ),
-    if (videoDetail.descV2 case final descV2? when descV2.isNotEmpty) ...[
-      const SizedBox(height: 8),
-      SelectionText.rich(
-        buildDesc(descV2),
-        style: const TextStyle(height: 1.4),
+      NoTranslucentArea(
+        child: Obx(() {
+          final videoTags = introController.videoTags.value;
+          if (videoTags == null || videoTags.isEmpty) {
+            return const SizedBox.shrink();
+          }
+          return _buildTags(videoTags);
+        }),
       ),
-    ],
-    NoTranslucentArea(
-      child: Obx(() {
-        final videoTags = introController.videoTags.value;
-        if (videoTags == null || videoTags.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        return _buildTags(videoTags);
-      }),
-    ),
-  ];
+    ];
+  }
 
   WidgetSpan _labelWidget(String text, Color bgColor, Color textColor) {
     return WidgetSpan(

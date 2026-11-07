@@ -218,12 +218,6 @@ List<SettingsModel> get playSettings => [
     setKey: SettingBoxKey.expandIntroPanelH,
     defaultVal: false,
   ),
-  const SwitchModel(
-    title: '隐藏视频简介Av号',
-    leading: Icon(Icons.hide_source),
-    setKey: SettingBoxKey.hideAvNumber,
-    defaultVal: false,
-  ),
   SwitchModel(
     title: '横屏分P/合集列表显示在Tab栏',
     leading: const Icon(Icons.format_list_numbered_rtl_sharp),

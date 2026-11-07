@@ -7,6 +7,7 @@ import 'package:PiliPlus/common/widgets/pair.dart';
 import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/models/common/bar_hide_type.dart';
 import 'package:PiliPlus/models/common/danmaku/danmaku_font_sync_mode.dart';
+import 'package:PiliPlus/models/common/desc_number_tab_type.dart';
 import 'package:PiliPlus/models/common/dm_chart_source.dart';
 import 'package:PiliPlus/models/common/dynamic/dynamic_badge_mode.dart';
 import 'package:PiliPlus/models/common/dynamic/dynamics_type.dart';
@@ -1937,14 +1938,6 @@ abstract final class Pref {
   static set allowAv(bool value) =>
       _setting.put(SettingBoxKey.allowAv, value);
 
-  static bool get hideAvNumber =>
-      _setting.get(SettingBoxKey.hideAvNumber,
-          defaultValue:false);
-
-  static set hideAvNumber(bool value) =>
-      _setting.put(SettingBoxKey.hideAvNumber, value);
-
-
   static String get bvJumpWaitSec {
     final value = _setting.get(
       SettingBoxKey.bvJumpWaitSec,
@@ -2010,6 +2003,28 @@ static set lastBvClipboard(String? value) {
       }
     }
     return MineTabType.kDefault;
+  }
+
+  /// 简介里显示哪些视频号，顺序即显示顺序（空列表 = 两个都不显示）。
+  ///
+  /// 存过记录（哪怕存的是空列表）就按记录来，没存过就两个都显示。
+  static List<DescNumberType> get descNumberTabs {
+    final tabs = _setting.get(SettingBoxKey.descNumberTabs) as List?;
+    if (tabs != null) {
+      return tabs
+          .whereType<int>()
+          .where((i) => i >= 0 && i < DescNumberType.values.length)
+          .map((i) => DescNumberType.values[i])
+          .toList();
+    }
+    return DescNumberType.kDefault;
+  }
+
+  static Future<void> saveDescNumberTabs(List<DescNumberType> tabs) async {
+    await _setting.put(
+      SettingBoxKey.descNumberTabs,
+      tabs.map((e) => e.index).toList(),
+    );
   }
 
   static bool get blockAtOnlyReply =>

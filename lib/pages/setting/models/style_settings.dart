@@ -13,6 +13,7 @@ import 'package:PiliPlus/common/widgets/scroll_physics.dart'
     show kSpringDescription;
 import 'package:PiliPlus/common/widgets/stateful_builder.dart';
 import 'package:PiliPlus/models/common/bar_hide_type.dart';
+import 'package:PiliPlus/models/common/desc_number_tab_type.dart';
 import 'package:PiliPlus/models/common/dynamic/dynamic_badge_mode.dart';
 import 'package:PiliPlus/models/common/dynamic/up_panel_position.dart';
 import 'package:PiliPlus/models/common/home_tab_type.dart';
@@ -407,6 +408,17 @@ List<SettingsModel> get styleSettings => [
     leading: const Icon(Icons.person_outline),
     getSubtitle: () =>
         '当前显示：${Pref.mineTabs.map((item) => item.label).join('、')}',
+  ),
+  NormalModel(
+    onTap: _showDescNumberDialog,
+    title: '简介视频号',
+    leading: const Icon(Icons.format_list_numbered),
+    getSubtitle: () {
+      final tabs = Pref.descNumberTabs;
+      return tabs.isEmpty
+          ? '当前显示：不显示'
+          : '当前显示：${tabs.map((item) => item.title).join('、')}';
+    },
   ),
   PopupModel(
     leading: const Icon(Icons.home_outlined),
@@ -1027,6 +1039,25 @@ Future<void> _showMineTabsDialog(
       res.map((item) => item.index).toList(),
     );
     SmartDialog.showToast('重启生效');
+    setState();
+  }
+}
+
+Future<void> _showDescNumberDialog(
+  BuildContext context,
+  VoidCallback setState,
+) async {
+  final res = await showDialog<List<DescNumberType>>(
+    context: context,
+    builder: (context) => OrderedMultiSelectDialog<DescNumberType>(
+      title: const Text('简介视频号'),
+      initValues: Pref.descNumberTabs,
+      values: {for (final i in DescNumberType.values) i: i.title},
+    ),
+  );
+  if (res != null) {
+    await Pref.saveDescNumberTabs(res);
+    SmartDialog.showToast('重新打开视频生效');
     setState();
   }
 }
