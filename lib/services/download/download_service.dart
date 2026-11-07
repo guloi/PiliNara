@@ -48,7 +48,7 @@ class DownloadService extends GetxService {
   /// 早期版本把 UGC 合集归属写进 `auto_folder_source_key` 时用的前缀。
   static const _ugcSeasonKeyPrefix = 'ugc-season:';
 
-  final _lock = Lock();
+  final _downloadLock = Lock();
 
   /// 弹幕下载锁：批量更新时外层 Future.wait 会并发调用多次 downloadDanmaku，
   /// 此锁确保同一时间只有一个视频在下载弹幕，避免总并发超过 _maxDanmakuConcurrency。
@@ -328,7 +328,7 @@ class DownloadService extends GetxService {
       ..status = DownloadStatus.wait;
     waitDownloadQueue.add(entry);
     if (curDownload.value?.status.isDownloading != true) {
-      startDownload(entry);
+      queueDownload(entry);
     }
   }
 
@@ -359,23 +359,25 @@ class DownloadService extends GetxService {
     return dir.path;
   }
 
-  Future<void> startDownload(BiliDownloadEntryInfo entry) {
-    return _lock.synchronized(() async {
-      await _downloadManager?.cancel(isDelete: false);
-      await _audioDownloadManager?.cancel(isDelete: false);
-      _downloadManager = null;
-      _audioDownloadManager = null;
-      if (curDownload.value case final curEntry?) {
-        if (curEntry.status.isDownloading) {
-          curEntry.status = DownloadStatus.pause;
-        }
-      }
+  Future<void> queueDownload(BiliDownloadEntryInfo entry) {
+    return _downloadLock.synchronized(() => _prepareDownload(entry));
+  }
 
-      _curCid = entry.cid;
-      curDownload.value = entry;
-      waitDownloadQueue.refresh();
-      await _startDownload(entry);
-    });
+  Future<void> _prepareDownload(BiliDownloadEntryInfo entry) async {
+    await _downloadManager?.cancel(isDelete: false);
+    await _audioDownloadManager?.cancel(isDelete: false);
+    _downloadManager = null;
+    _audioDownloadManager = null;
+    if (curDownload.value case final curEntry?) {
+      if (curEntry.status.isDownloading) {
+        curEntry.status = .pause;
+      }
+    }
+
+    _curCid = entry.cid;
+    curDownload.value = entry;
+    waitDownloadQueue.refresh();
+    await _startDownload(entry);
   }
 
   Future<bool> downloadDanmaku({
@@ -723,7 +725,9 @@ class DownloadService extends GetxService {
                 : null);
 
         if (subtitles != null && subtitles.isNotEmpty) {
-          entry.subtitles = subtitles;
+          entry.subtitles = subtitles
+              .map((e) => e.toLocal(entry.entryDirPath))
+              .toList();
           needsUpdate = true;
           Future.wait(subtitles.map((sub) => _downloadSubtitle(entry, sub)));
         }
@@ -760,6 +764,11 @@ class DownloadService extends GetxService {
     try {
       if (!await downloadDanmaku(entry: entry)) {
         return;
+      }
+
+      // ugc segments
+      if (entry.pageData != null && Pref.enableSponsorBlock) {
+        _updateBlockSegments(entry);
       }
 
       _updateCurStatus(DownloadStatus.getPlayUrl);
@@ -929,7 +938,7 @@ class DownloadService extends GetxService {
 
   void nextDownload() {
     if (waitDownloadQueue.isNotEmpty) {
-      startDownload(waitDownloadQueue.first);
+      queueDownload(waitDownloadQueue.first);
     }
   }
 
