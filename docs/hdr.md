@@ -59,7 +59,7 @@ Flutter 的 `Texture` 固定是 **RGBA8888**，HDR 元数据在这一步必然�
 | 渲染 API | `gpuNextApi` | `auto` | `auto`：SDR 走 gpu-next OpenGL，HDR / 杜比视界在关闭下一项后走 Vulkan；`vulkan`：SDR 纹理也走 Vulkan（初始化失败自动回退 OpenGL）；`opengl`：全部 OpenGL，兼容性最好，但 EGL 无法激发 HDR |
 | HDR / 杜比视界时切回 MediaCodec | `gpuNextHdrMediaCodec` | 开 | HDR / 杜比视界片源改走 `mediacodec_embed` 直通，只让 SDR 走 gpu-next。渲染 API 为 `opengl` 时**建议保持开启**：这是 OpenGL 模式下唯一能真正激发 HDR 的路径；关闭后 HDR 会被映射成 SDR。**杜比视界 profile 5 例外**：它的 IPTPQc2 只能由 libplacebo 还原，MediaCodec 出画会偏色，因此 profile 5 优先走 gpu-next，不受本项影响；Vulkan 不可用时按下一项的「profile 5 回退方式」处理 |
 | 杜比视界 profile 5 回退方式 | `gpuNextDoviFallback` | `soft` | Vulkan 不可用（驱动不支持、已判定失败，或渲染 API 选了 `opengl`）时 profile 5 的出画方式：`soft` 继续用 gpu-next OpenGL 软解——色彩正确，但 EGL 没有 HDR 交换链，面板不会激发；`mediacodec` 切回 `mediacodec_embed` 直通——杜比视界设备能正常激发，非杜比视界设备拿不到 RPU 会偏色 |
-| 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | profile 5 的 IPTPQc2 依赖 RPU 元数据，`mediacodec-copy` 拿不到（会整体偏色），因此这类片源走 gpu-next 时强制软解（`hwdec=no`）。本项只决定走 gpu-next 时的解码方式，Vulkan 不可用时的回退见上一项 |
+| 杜比视界 profile 5 软解 | `gpuNextDoviSoft` | 开 | 开启：profile 5 在 gpu-next 上一律软解（`hwdec=no`），libplacebo 拿到 RPU 才能还原 IPTPQc2，色彩正确、Vulkan 下可激发。关闭：直接切回 `mediacodec_embed` 直通，由设备自身的杜比视界能力出画（能激发，但拿不到 RPU 的设备会偏色） |
 
 ## 三、原生出画层怎么工作
 
@@ -326,9 +326,13 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
    兼容模式」才会改用同分辨率 HDR10（125）。兼容模式只处理 profile 5；profile
    8/8.4 带 HDR10/HLG 基础层，始终保留 DoVi 直通。走 gpu-next 的 profile 5 会让
    窗口进入 HDR 模式（Vulkan 交换链按 HDR10 输出），这是正常行为。
-   开启「默认 gpu-next」后，profile 5 更进一步**强制**走 gpu-next：即使
+   开启「默认 gpu-next」后，profile 5 默认走 gpu-next：即使
    「HDR / 杜比视界时切回 MediaCodec」开着，也不再交给 MediaCodec 直通，
    因为解码器不会把 DoVi RPU 交回给应用，直通的结果就是整片偏色。
+   若确实想用系统解码器直通（例如设备支持杜比视界、希望交给它激发），把
+   「杜比视界 profile 5 软解」关掉即可，此时 profile 5 直接走 `mediacodec_embed`。
+   走 gpu-next 时一律软解：`mediacodec-copy` 拿不到 RPU，libplacebo 就没有色彩
+   元数据，既偏色又会被当成 SDR 输出（亮度不激发）。
    此时渲染 API 为 `opengl` 或 Vulkan 已被判定不可用时，按设置页的
    「杜比视界 profile 5 回退方式」决定出画：`soft`（默认）退回 `gpu-next-gl` 软解，
    色彩仍然正确，只是 EGL 无法激发 HDR，画面会被映射成 SDR；`mediacodec`

@@ -718,6 +718,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 「HDR / 杜比视界时切回 MediaCodec」；Vulkan 不可用时按设置页的
     // 「profile 5 回退方式」决定继续软解还是切回 MediaCodec。
     if (_defaultGpuNext && isDolbyVisionProfile5) {
+      // 关闭「profile 5 软解」即明确要求走 MediaCodec：gpu-next 拿不到 RPU
+      // 时色彩本身就不对，与其映射成 SDR 不如交给系统解码器直通，由设备
+      // 自己的杜比视界能力出画（不支持的设备会偏色，但可以激发）。
+      if (!Pref.gpuNextDoviSoft && Pref.enableHA) {
+        return HdrBackend.mediacodecEmbed;
+      }
       // Vulkan 可用时优先它：libplacebo 先把 IPTPQc2 还原成 HDR10，再交给
       // Vulkan 交换链输出，只有这条路能真正激发杜比视界 / HDR 面板。
       if (_gpuNextApi != GpuNextApi.opengl && !_vulkanVoBlocked) {
@@ -877,8 +883,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     if (backend.isGpuNext) {
       // 杜比视界 profile 5 的 IPTPQc2 只能靠 RPU 元数据还原。Android 的
       // mediacodec-copy 拿不到解码器解析出的 DoVi side data，libplacebo
-      // 只能按 BT.2020/PQ 处理，画面整体偏色；这类片源改走软解保留 RPU。
-      if (isDolbyVisionProfile5 && Pref.gpuNextDoviSoft) {
+      // 只能按 BT.2020/PQ 处理，画面整体偏色；这类片源只要还在 gpu-next
+      // 上就强制软解保留 RPU（关闭软解时上面已改走 MediaCodec 直通）。
+      if (isDolbyVisionProfile5) {
         return 'no';
       }
       return config.copyHwdec;

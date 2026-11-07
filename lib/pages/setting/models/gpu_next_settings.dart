@@ -72,7 +72,7 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
       if (Pref.defaultGpuNext)
         SwitchModel(
           title: '杜比视界 profile 5 软解',
-          subtitle: '关闭后改用硬件拷贝解码，可能偏色。仅影响走 gpu-next 时。',
+          subtitle: '开启：gpu-next 软解，色彩正确；关闭：切回 MediaCodec 直通，靠设备自身杜比视界能力出画。',
           leading: const Icon(Icons.color_lens_outlined),
           setKey: SettingBoxKey.gpuNextDoviSoft,
           defaultVal: true,
