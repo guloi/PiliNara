@@ -45,6 +45,14 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
   /// 已经交给控制器的 wid。Surface 被重建后（换缓冲格式、Activity 重建）
   /// wid 会变，必须重新 attach，否则控制器/mpv 仍拿着已失效的 Surface。
   int? _attachedWid;
+
+  /// 上一次 create 时请求的缓冲位深。
+  ///
+  /// 原生 SurfaceView 的缓冲格式只在 create 时决定一次，之后不会跟着变。
+  /// 后端在 MediaCodec 直通（8bit）与 gpu-next（10bit）之间切换时——例如
+  /// 杜比视界 profile 5 分P 之后紧接着 HDR10 / profile 8 分P——必须重建
+  /// SurfaceView，否则 HDR 会渲染到 8bit 缓冲上，表现为只有声音没有画面。
+  bool? _createdTenBit;
   (int, int, int, int)? _lastRect;
   bool _disposed = false;
   bool _frameScheduled = false;
@@ -79,6 +87,7 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
     // 切后台/Activity 重建可能让原生侧的宿主与 Surface 丢失，
     // 回到前台时重新 create 一次（原生侧会复用已有 Surface，不会重建）。
     _ensureHandler();
+    _createdTenBit = _wantTenBit;
     unawaited(
       NativeVideoSurfaceChannel.create(
         owner: _owner,
@@ -206,10 +215,20 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
     if (width <= 0 || height <= 0) return;
 
     final target = (left, top, width, height);
-    if (!_created) {
+    final wantTenBit = _wantTenBit;
+    if (!_created || _createdTenBit != wantTenBit) {
+      final recreate = _created;
       _created = true;
+      _createdTenBit = wantTenBit;
       _lastRect = target;
       _ensureHandler();
+      if (recreate) {
+        // 位深变了：原生侧会拆掉旧 SurfaceView 重建，wid 随之改变，
+        // 因此这里先清掉挂载状态，等新的 surfaceCreated 重新 attach。
+        _attached = false;
+        _attachedWid = null;
+        _surfaceWid = null;
+      }
       unawaited(
         NativeVideoSurfaceChannel.create(
           owner: _owner,
@@ -217,7 +236,7 @@ class _NativeVideoSurfaceState extends State<NativeVideoSurface>
           y: top,
           width: width,
           height: height,
-          tenBit: _wantTenBit,
+          tenBit: wantTenBit,
         ),
       );
       return;

@@ -1348,22 +1348,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     return '，按当前片源 / 设置使用（HDR 设置里选的是 ${configured.label}）';
   }
 
-  /// `vo` 只会显示 gpu-next / gpu，看不出底层到底是 Vulkan 还是 OpenGL。
-  ///
-  /// 优先用 mpv 自己报的 `gpu-api` / `gpu-context`（VO 配置完成后才有值），
-  /// 读不到时按控制器实际下发的后端推断（Media3 路径下 mpv 只是纹理占位）。
-  String _voApiLabel(String vo, String gpuApi, String gpuContext) {
-    if (!vo.contains('gpu')) return '';
-    final String api;
-    if (gpuApi != '-') {
-      api = gpuApi;
-    } else if (gpuContext != '-') {
-      api = gpuContext.contains('vk') ? 'vulkan' : 'opengl';
-    } else {
-      api =
-          _renderBackend.gpuApi ??
-          (_gpuNextApi == GpuNextApi.vulkan ? 'vulkan' : 'opengl');
-    }
+  /// `vo` 只会显示 gpu-next / gpu，看不出底层到底是 Vulkan 还是 OpenGL；
+  /// Media3 路径下 mpv 的 vo 只是纹理占位（null），直接读还会是空值。
+  /// 因此按控制器实际下发的后端推断，保证任何片源都能看到实际渲染 API。
+  String _voApiLabel() {
+    // 只有 gpu-next / gpu 才有 Vulkan / OpenGL 之分；MediaCodec 直通由系统
+    // 解码器出画，标上渲染 API 反而会误导。
+    if (!_renderBackend.vo.contains('gpu')) return '';
+    final api =
+        _renderBackend.gpuApi ??
+        (_gpuNextApi == GpuNextApi.vulkan ? 'vulkan' : 'opengl');
     return api == 'vulkan' ? 'Vulkan' : 'OpenGL';
   }
 
@@ -1381,10 +1375,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
 
     final native = nativeSurfaceMode.value;
-    final voName = read('vo');
     final gpuApi = read('gpu-api');
     final gpuContext = read('gpu-context');
-    final voApi = _voApiLabel(voName, gpuApi, gpuContext);
+    // Media3 出画时 mpv 的 vo 只是纹理占位（null），直接读会显示成空，
+    // 因此按控制器实际下发的后端取 vo 名称与渲染 API。
+    final voName = _useMedia3Dovi ? _renderBackend.vo : read('vo');
+    final voApi = _voApiLabel();
     final doviLabel = !isDolbyVisionSource
         ? '否'
         : '是（${isDolbyVisionProfile5 ? 'profile 5' : 'profile 8'}）';
@@ -1392,7 +1388,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       '出画路径: ${native ? 'SurfaceView(HDR)' : 'Texture(8bit)'}',
       if (_useMedia3Dovi)
         '真 DoVi 解码: Media3 / ExoPlayer（视频 + 音频），'
-            'mpv 只保留时间轴（下面的 vo / hwdec 是 mpv 自己的纹理输出，不参与出画）',
+            'mpv 只保留时间轴（不走 mpv 的 vo，下面的 vo / hwdec 按实际后端显示）',
       if (native)
         '原生 Surface: wid=${_nativeWid ?? '-'}，'
             'SurfaceView 尺寸=${_nativeSurfaceSize == null ? '-' : '${_nativeSurfaceSize!.$1}x${_nativeSurfaceSize!.$2}'}',
@@ -1410,7 +1406,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'vo: $voName${voApi.isEmpty ? '' : '（$voApi）'}',
       'vo-configured: ${read('vo-configured')}',
       'gpu-api: $gpuApi / gpu-context: $gpuContext',
-      'hwdec-current: ${read('hwdec-current')}',
+      // Media3 出画时 mpv 的视频轨是关掉的（vid=no），读 hwdec-current 只会是空值。
+      'hwdec-current: ${_useMedia3Dovi ? 'mediacodec（Media3 / ExoPlayer 解码，mpv 不解视频）' : read('hwdec-current')}',
       '视频色彩: ${read('video-params/primaries')} / ${read('video-params/gamma')}',
       '像素格式: ${read('video-params/pixelformat')}',
       '色彩矩阵: ${read('video-params/colormatrix')}',
@@ -2840,7 +2837,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         player.setProperty('aid', 'no');
         player.setProperty('vo', 'null');
       } else {
+        // 上一集把视频轨关掉了（vid=no），这里必须显式打开：mpv 只在文件
+        // 打开后才会把 vid 重置成 auto，而下一段代码紧接着就 open，中间
+        // 如果沿用 vid=no，切到 HDR10 / profile 8 分P 后会只有声音没有画面。
         player.setProperty('aid', 'auto');
+        player.setProperty('vid', 'auto');
         if (nativeSurfaceMode.value) {
           _applyNativeSurface(target: player);
         }

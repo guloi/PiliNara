@@ -316,7 +316,10 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
    SDR 路径回退 `gpu-next-gl`；也可以手动切后端。
    另外：原生 SurfaceView 只在 gpu-next（libplacebo）自己渲染时请求 10bit
    缓冲（`RGBA_1010102`）；HDR 交给 MediaCodec 直通时缓冲格式由解码器决定，
-   不再强设，避免直通失败。
+   不再强设，避免直通失败。缓冲格式只在创建 SurfaceView 时生效一次，所以
+   后端在 8bit / 10bit 之间切换时（杜比视界 profile 5 分P 之后接 HDR10 /
+   profile 8 分P）`NativeVideoSurface` 会重建 SurfaceView 换取对应位深，
+   否则 HDR 会渲染到 8bit 缓冲上，表现为只有声音没有画面。
    此外 fork 的构建矩阵里 `MPV_VULKAN` 与 `LIBPLACEBO_VULKAN` 必须同时打开；只开
    其中一个会出现 GL/mediacodec 输出全黑（fork 提交 `effde5e` 用于二分定位）。
 2. **杜比视界 profile 5**：使用 IPTPQc2 色彩空间，`mediacodec_embed` 直通会把它
@@ -341,8 +344,9 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
    HDR（125）与杜比视界 profile 8 仍按「切回 MediaCodec」的设置走直通。
    关掉「软解」后如果还开着 HDR 设置里的「profile 5 Media3 解码（实验）」，
    视频会改由 Media3/ExoPlayer 解到同一块原生 SurfaceView，mpv 只保留时间轴；
-   此时诊断里的 vo / vo-configured 仍显示 gpu-next，那是 media_kit 给 mpv
-   建的纹理输出，不参与出画，属正常现象（真正的出画路径看「真 DoVi 解码」那行）。
+   此时 mpv 的视频轨是关掉的（`vid=no`），诊断里的 vo / hwdec 按实际后端显示
+   （Media3 出画时会注明「Media3 / ExoPlayer 解码」），真正的出画路径看
+   「真 DoVi 解码」那行。
 3. **手势限制**：原生 SurfaceView 是独立图层，无法跟随 Flutter 的旋转与镜像。
    HDR 直通时禁用双指旋转、自动重置镜像；缩放/平移通过矩形同步仍然可用。
 4. **PiP**：支持，但小窗圆角无法裁切原生图层（会看到直角视频）；
