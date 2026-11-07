@@ -241,7 +241,6 @@ class _DownloadPagePageState extends State<DownloadPagePage>
                   if (_pages.isEmpty) {
                     return const HttpError();
                   }
-                  }
                   return SliverGrid.builder(
                     gridDelegate: gridDelegate,
                     itemBuilder: (context, index) {

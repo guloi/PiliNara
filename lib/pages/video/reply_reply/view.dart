@@ -229,7 +229,7 @@ class _VideoReplyReplyPanelState extends State<VideoReplyReplyPanel>
             needDivider: false,
             onReply: (replyItem) => controller.onReply(replyItem, index: -1),
             upMid: widget.upMid ?? controller.upMid,
-            getTag: () => widget.heroTag,
+            getTag: () => widget.heroTag ?? '',
             onCheckReply: (item) =>
                 controller.onCheckReply(item, isManual: true),
           ),

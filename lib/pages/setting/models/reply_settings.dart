@@ -68,12 +68,12 @@ List<SettingsModel> get replySettings => [
     setKey: SettingBoxKey.swapReplyLikeDislike,
     defaultVal: false,
   ),
-  getBanWordModel(
+  getListBanWordModel(
     title: '评论关键词过滤',
     key: SettingBoxKey.banWordForReply,
     onChanged: (value) {
       ReplyGrpc.replyRegExp = value;
-      ReplyGrpc.enableFilter = value.pattern.isNotEmpty;
+      ReplyGrpc.enableFilter = value.isNotEmpty;
     },
   ),
   NormalModel(

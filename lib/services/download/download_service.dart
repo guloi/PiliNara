@@ -494,7 +494,6 @@ class DownloadService extends GetxService {
                     )
                   : sub.lanDoc ?? '',
               'subtitle_url': sub.subtitleUrl ?? '',
-              'subtitle_url_v2': sub.subtitleUrlV2,
               'type': sub.isAi ? 1 : 0,
             },
           )

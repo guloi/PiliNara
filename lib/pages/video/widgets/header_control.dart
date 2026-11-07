@@ -1249,21 +1249,7 @@ class HeaderControlState extends State<HeaderControl>
   Future<Uint8List?> _loadSubtitleJsonBytes(Subtitle item) async {
     final url = item.subtitleUrl;
     if (url == null || url.isEmpty) return null;
-    final res = await Request.dio.get<Uint8List>(
-      url.http2https,
-      options: Options(
-        responseType: ResponseType.bytes,
-        headers: Constants.baseHeaders,
-        extra: {'account': const NoAccount()},
-      ),
-    );
-    if (res.statusCode != 200) return null;
-    return Uint8List.fromList(
-      Request.responseBytesDecoder(
-        res.data!,
-        res.headers.map,
-      ),
-    );
+    return SubtitleUtils.getSubtitle(url);
   }
 
   Future<Uint8List?> _loadSubtitleVttBytes(int index, Subtitle item) async {
