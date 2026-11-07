@@ -832,6 +832,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   HdrBackend get _renderBackend =>
       _wantNativeSurface ? _hdrOutputBackend : _textureBackend;
 
+  /// 尺寸变化后是否必须重建 VO 才能保住 HDR 输出。
+  ///
+  /// 只有 gpu-next + Vulkan 这条真正的 HDR 交换链会受影响：mpv 的
+  /// `android_reconfig` 会重新 setBuffersGeometry，把窗口 dataspace 复位；
+  /// 一些 ROM 上重建后的交换链因此退回 SDR（进全屏后画面发灰、面板不再激发）。
+  /// mediacodec_embed 由解码器直通，gpu-next-gl / gpu 是 SDR 输出，都不需要。
+  bool get _shouldRebuildVoOnResize =>
+      nativeSurfaceMode.value &&
+      !_useMedia3Dovi &&
+      _renderBackend == HdrBackend.gpuNext;
+
   /// 原生 SurfaceView 是否申请 10bit 缓冲格式。
   ///
   /// 由 gpu-next（libplacebo）渲染到 Surface 时请求 10bit，给 HDR / 杜比
@@ -1884,7 +1895,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   ///
   /// 在 setDataSource 开始、播放器与首帧出现之前切换，让面板的 HDR 模式
   /// 切换发生在加载/黑屏阶段，而不是首帧出声时整屏亮一下。
-  void _updateWindowHdrMode() {
+  /// [force] 为 true 时即使当前请求状态没变也重新下发一次，
+  /// 用于窗口尺寸变化后把系统 HDR 色彩模式重新钉回来。
+  void _updateWindowHdrMode({bool force = false}) {
     // 只有 mediacodec_embed 和 gpu-next(Vulkan) 有真正的 HDR 输出路径：
     // 前者由解码器直通，后者通过 Vulkan 交换链协商 HDR 色彩空间。
     // gpu-next-gl / gpu 的 EGL 路径实际输出 SDR，不能预切窗口 HDR。
@@ -1898,7 +1911,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         backend.supportsHdrOutput &&
         (!isDolbyVisionSource || doviViaGpuNext) &&
         !isHdrVividSource;
-    if (wanted == _windowHdrRequested) return;
+    if (!force && wanted == _windowHdrRequested) return;
     _windowHdrRequested = wanted;
     debugPrint(
       '[HDR] window color mode=$wanted backend=${backend.value} '
@@ -2034,6 +2047,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       final size = _nativeSurfaceSize;
       if (player == null || size == null) return;
       if (_appliedSurfaceSize == size) return;
+      if (_shouldRebuildVoOnResize) {
+        // HDR 直通 + Vulkan：改 android-surface-size 会让还在跑的 VO 走
+        // android_reconfig，那里会调 ANativeWindow_setBuffersGeometry，顺手
+        // 把窗口的 BT.2020/PQ dataspace 复位。部分 ROM 上重建出来的交换链
+        // 就回落成 SDR，表现为「进全屏后画面发灰、面板不再激发 HDR」，半屏
+        // 则正常。这里重新确认窗口 HDR 模式，并在 vo=null 的情况下写入新尺寸
+        // 再重建 VO，让 android_init 在新尺寸上重新把窗口切成 10bit BT.2020/PQ。
+        _updateWindowHdrMode(force: true);
+        _applyNativeSurface(forceVoRebuild: true);
+        return;
+      }
       try {
         player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
         _appliedSurfaceSize = size;
@@ -2071,7 +2095,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     });
   }
 
-  void _applyNativeSurface({Player? target}) {
+  void _applyNativeSurface({Player? target, bool forceVoRebuild = false}) {
     // 当前片源不是原生出画，或走 Media3 DoVi 时，都不能给 mpv 下发 vo/wid。
     if (!nativeSurfaceMode.value || _useMedia3Dovi) return;
     final player = target ?? _videoPlayerController;
@@ -2084,9 +2108,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // gpu-next 与 gpu-next-gl 的 vo 都是 gpu-next，只有 gpu-api 不同；
     // 只比较 vo 会导致切换后端后仍沿用旧的 Vulkan/OpenGL 上下文。
     final needVo =
-        _appliedWid != wid || _appliedVo != vo || _appliedBackend != backend;
+        forceVoRebuild ||
+        _appliedWid != wid ||
+        _appliedVo != vo ||
+        _appliedBackend != backend;
     try {
-      if (_appliedSurfaceSize != size) {
+      if (!needVo && _appliedSurfaceSize != size) {
         player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
         _appliedSurfaceSize = size;
       }
@@ -2095,8 +2122,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         // 然后给 wid，最后才设置 vo。gpu-context 只能在 VO 创建前生效；
         // media_kit 创建 VideoController 时会把 gpu-context 覆盖成 android，
         // 所以这里必须在 vo=gpu-next 之前重新写回 androidvk。
+        // 尺寸同理放在 vo=null 之后：VO 还活着时改 android-surface-size 会触发
+        // android_reconfig 复位窗口 dataspace，全屏后 HDR 交换链会回落成 SDR。
         player.setProperty('vo', 'null');
         _applyHdrProperties(player, hdrSurface: true);
+        if (_appliedSurfaceSize != size) {
+          player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
+          _appliedSurfaceSize = size;
+        }
         player.setProperty('wid', '$wid');
         player.setProperty('vid', 'auto');
         player.setProperty('vo', vo);
@@ -3784,6 +3817,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   void _setFullScreen(bool val) {
     isFullScreen.value = val;
     updateSubtitleStyle();
+    // 全屏切换会改窗口的 SystemUI／方向，部分 ROM 上窗口 HDR 色彩模式会被
+    // 系统顺手复位，画面随即发灰、面板不再激发。这里先主动钉一次，
+    // 尺寸变化后的 VO 重建在 resizeNativeSurface 的防抖回调里兜底。
+    if (_shouldRebuildVoOnResize) _updateWindowHdrMode(force: true);
     onFullScreenChanged?.call(val);
   }
 
