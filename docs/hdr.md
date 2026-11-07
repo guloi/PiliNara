@@ -591,6 +591,14 @@ App 侧配套（`lib/plugin/pl_player/`）：
   libmpv 没有对应补丁（或设备不支持 10bit 窗口缓冲），降级到 `gpu`（SDR）并提示，
   避免停在「有声音的黑屏」；`_gpuNextGlUnavailable` 在进程内记住，切后端时复位。
 
+补丁的第二版还处理了「亮度正常但画面发灰」：EGL 驱动会给每次 `eglSwapBuffers` 入队的
+缓冲打上自己的 dataspace，只调 `ANativeWindow_setBuffersDataSpace` 会被 EGL 打回
+sRGB，PQ 数据就被当 SDR 解释（黑位抬起来、对比度差）。所以在 `eglCreateWindowSurface`
+时带上 `EGL_GL_COLORSPACE_KHR = EGL_GL_COLORSPACE_BT2020_PQ_EXT`（需要
+`EGL_EXT_gl_colorspace_bt2020_pq`，Adreno 有、部分 Mali 没有），失败则退回默认色彩空间
+并打 warn。日志级别调到 `v` 时能看到 `Android/EGL: 面色彩空间 = BT.2020/PQ` 或
+`Android/EGL: 指定 BT.2020/PQ 色彩空间失败，退回默认`。
+
 怎么试：设置 → HDR / 杜比视界 →「默认 gpu-next」开、渲染 API 选 **OpenGL**，并把
 「HDR / 杜比视界切回 MediaCodec」关掉（它优先级更高，开着就永远走直通）。
 然后全屏看「HDR 状态诊断」：`后端: gpu-next (opengl)`、`VO 输出色彩: bt.2020 / pq`、
