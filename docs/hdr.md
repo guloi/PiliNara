@@ -402,16 +402,18 @@ BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 RO
 
 现在的处理（`PlPlayerController`）：
 
-* `_setFullScreen` 在 HDR 直通时用 `_updateWindowHdrMode(force: true)`
-  重新钉一次窗口色彩模式；
-* `resizeNativeSurface` 的 200ms 防抖回调里，若 `_shouldRebuildVoOnResize`
-  （`nativeSurfaceMode && !_useMedia3Dovi && _renderBackend == gpuNext`）成立，
-  先 `vo=null`、补写 HDR 属性、再写新尺寸和 `wid`、最后重建 `vo`，
-  让 `android_init` 在新尺寸上重新把窗口切成 10bit BT.2020/PQ 后创建交换链，
-  绕开 `android_reconfig` 这条会掉 HDR 的路径。
+* `_setFullScreen` 在 HDR 直通时（`_isVulkanHdrOutput`，即
+  `nativeSurfaceMode && !_useMedia3Dovi && _renderBackend == gpuNext`）用
+  `_updateWindowHdrMode(force: true)` 重新钉一次窗口色彩模式；
+* `resizeNativeSurface` 的 200ms 防抖回调里**只写** `android-surface-size`，
+  不重建 VO。
 
-代价是全屏切换时 VO 重建，会有一帧黑；mediacodec_embed 直通与 SDR 纹理路径
-不受影响（仍只写 `android-surface-size`）。
+> 曾经试过「resize 时 `vo=null` 重建 VO」来绕开 `android_reconfig`，结论是不必要
+> 而且有害：`video/out/vulkan/context_android.c` 的 `android_reconfig` 本来就会在
+> `ra_vk_ctx_resize` 之前调 `android_apply_hdr_window()`（`setBuffersGeometry` 成
+> R10G10B10A2 + `setBuffersDataSpace(BT2020_PQ)`），重建并不能多保住什么；
+> 而 `vo=null` 期间 mpv 会短暂报 buffering，加上进出全屏的 SurfaceView 重建，
+> 表现就是「切全屏闪一下加载中」。
 
 ### 7.3 怎么拿到「全屏那一刻」的证据
 
@@ -436,6 +438,18 @@ BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 RO
 
 > 注意：这些值只用于判断，不要拿来自动重建 VO。部分 ROM 的 `Window.colorMode`
 > 回读始终是 0（半屏出画正常时也是 0），当判据会在每次进全屏时多闪黑一帧。
+
+### 7.4 进出全屏不闪「加载中」
+
+进出全屏会改方向与 SystemUI，SurfaceView 随之重建（新 `wid` → 重新下发 `vo`），
+mpv 在 VO 重建期间会短暂报 buffering，于是加载动画闪一下。处理：
+
+* 尺寸变化不再触发 VO 重建（见 7.2），把最常见的抖动源去掉；
+* `PlPlayerController.fullScreenTransition`：`_setFullScreen` 打开 900ms 过渡
+  窗口，`lib/plugin/pl_player/view/view.dart` 的加载动画条件里加上
+  `!fullScreenTransition.value`，这 900ms 内既不显示 `dataStatus.loading`
+  也不显示 `isBuffering` 的转圈。
+
 ## 八、代码位置
 
 | 文件 | 作用 |

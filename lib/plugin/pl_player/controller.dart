@@ -270,6 +270,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   Completer<bool>? _autoAudioRestoreCompleter;
   final RxBool suppressBufferingIndicator = false.obs;
 
+  /// 进/出全屏的过渡窗口（约 900ms）。
+  ///
+  /// 进出全屏会改方向与 SystemUI，SurfaceView 随之重建（新 wid → 重新下发
+  /// vo），mpv 在 VO 重建期间会短暂报 buffering；这期间把加载动画压住，
+  /// 避免全屏切换时闪一下「加载中」。
+  final RxBool fullScreenTransition = false.obs;
+  Timer? _fullScreenTransitionTimer;
+
   /// 自动恢复需要重初始化的回调（视频→playerInit，直播→queryLiveUrl）
   PlayerInitCallback? onNeedsPlayerInit;
 
@@ -832,13 +840,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   HdrBackend get _renderBackend =>
       _wantNativeSurface ? _hdrOutputBackend : _textureBackend;
 
-  /// 尺寸变化后是否必须重建 VO 才能保住 HDR 输出。
+  /// 当前是否走 gpu-next + Vulkan 这条真正的 HDR 交换链。
   ///
-  /// 只有 gpu-next + Vulkan 这条真正的 HDR 交换链会受影响：mpv 的
-  /// `android_reconfig` 会重新 setBuffersGeometry，把窗口 dataspace 复位；
-  /// 一些 ROM 上重建后的交换链因此退回 SDR（进全屏后画面发灰、面板不再激发）。
+  /// 只有这条路径的窗口色彩模式需要额外照顾：进出全屏会改方向与 SystemUI，
+  /// 部分 ROM 会顺手复位窗口 HDR 色彩模式（画面发灰、面板不再激发）。
+  /// 注意这里**不做** VO 重建：mpv 的 `android_reconfig` 已经会重新
+  /// setBuffersGeometry 并重下发 BT.2020/PQ dataspace，重建是多余的，
+  /// 而 `vo=null` 会让 mpv 在重建期间报 buffering，全屏切换就闪加载动画。
   /// mediacodec_embed 由解码器直通，gpu-next-gl / gpu 是 SDR 输出，都不需要。
-  bool get _shouldRebuildVoOnResize =>
+  bool get _isVulkanHdrOutput =>
       nativeSurfaceMode.value &&
       !_useMedia3Dovi &&
       _renderBackend == HdrBackend.gpuNext;
@@ -1559,15 +1569,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 全屏稳定后的 HDR 复查（只记录，不重建）。
   ///
   /// 全屏会改 SurfaceView 尺寸，android_reconfig 会重新下发 setBuffersGeometry
-  /// 与 dataspace（见 context_android.c 的 android_apply_hdr_window）。这里做两件
-  /// 事：把窗口 HDR 色彩模式重新钉一次（部分 ROM 会在尺寸/方向变化后复位），
-  /// 再把显示端的实际状态记进诊断。
+  /// 与 dataspace（见 context_android.c 的 android_apply_hdr_window）。窗口 HDR
+  /// 色彩模式已在 `_setFullScreen` 里钉过，这里只把显示端的实际状态记进诊断。
   ///
   /// 注意不要根据这些值自动重建 VO：部分 ROM 的 Window.colorMode 回读始终是
-  /// 0（半屏出画正常时也是 0），拿它当判据会在每次进全屏时多闪黑一帧。
+  /// 0（半屏出画正常时也是 0），拿它当判据会在每次进全屏时多闪黑一帧；
+  /// `vo=null` 重建期间 mpv 还会报 buffering，全屏切换就闪加载动画。
   Future<void> _verifyFullScreenHdr() async {
     if (_videoPlayerController == null || !isFullScreen.value) return;
-    if (_shouldRebuildVoOnResize) _updateWindowHdrMode(force: true);
+    // 窗口色彩模式已在 _setFullScreen 里钉过，这里只记录，不要再动 VO/尺寸。
     final display = await NativeVideoSurfaceChannel.hdrDisplayInfo();
     if (display != null) _displayHdrInfo = display;
     final colorMode = (_displayHdrInfo?['colorMode'] as num?)?.toInt();
@@ -2173,17 +2183,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       final size = _nativeSurfaceSize;
       if (player == null || size == null) return;
       if (_appliedSurfaceSize == size) return;
-      if (_shouldRebuildVoOnResize) {
-        // HDR 直通 + Vulkan：改 android-surface-size 会让还在跑的 VO 走
-        // android_reconfig，那里会调 ANativeWindow_setBuffersGeometry，顺手
-        // 把窗口的 BT.2020/PQ dataspace 复位。部分 ROM 上重建出来的交换链
-        // 就回落成 SDR，表现为「进全屏后画面发灰、面板不再激发 HDR」，半屏
-        // 则正常。这里重新确认窗口 HDR 模式，并在 vo=null 的情况下写入新尺寸
-        // 再重建 VO，让 android_init 在新尺寸上重新把窗口切成 10bit BT.2020/PQ。
-        _updateWindowHdrMode(force: true);
-        _applyNativeSurface(forceVoRebuild: true);
-        return;
-      }
+      // 只改尺寸，不重建 VO：mpv 会走 android_reconfig，那里已经重新
+      // setBuffersGeometry 并重下发 HDR dataspace。vo=null 重建会让 mpv
+      // 在重建期间报 buffering，进出全屏就闪一下加载动画。
       try {
         player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
         _appliedSurfaceSize = size;
@@ -2221,7 +2223,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     });
   }
 
-  void _applyNativeSurface({Player? target, bool forceVoRebuild = false}) {
+  void _applyNativeSurface({Player? target}) {
     // 当前片源不是原生出画，或走 Media3 DoVi 时，都不能给 mpv 下发 vo/wid。
     if (!nativeSurfaceMode.value || _useMedia3Dovi) return;
     final player = target ?? _videoPlayerController;
@@ -2234,7 +2236,6 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // gpu-next 与 gpu-next-gl 的 vo 都是 gpu-next，只有 gpu-api 不同；
     // 只比较 vo 会导致切换后端后仍沿用旧的 Vulkan/OpenGL 上下文。
     final needVo =
-        forceVoRebuild ||
         _appliedWid != wid ||
         _appliedVo != vo ||
         _appliedBackend != backend;
@@ -2248,8 +2249,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         // 然后给 wid，最后才设置 vo。gpu-context 只能在 VO 创建前生效；
         // media_kit 创建 VideoController 时会把 gpu-context 覆盖成 android，
         // 所以这里必须在 vo=gpu-next 之前重新写回 androidvk。
-        // 尺寸同理放在 vo=null 之后：VO 还活着时改 android-surface-size 会触发
-        // android_reconfig 复位窗口 dataspace，全屏后 HDR 交换链会回落成 SDR。
+        // 尺寸同理放在 vo=null 之后：此时没有活着的交换链，写尺寸不会触发
+        // android_reconfig 去动正在出画的窗口。
         player.setProperty('vo', 'null');
         _applyHdrProperties(player, hdrSurface: true);
         if (_appliedSurfaceSize != size) {
@@ -3946,9 +3947,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     isFullScreen.value = val;
     updateSubtitleStyle();
     // 全屏切换会改窗口的 SystemUI／方向，部分 ROM 上窗口 HDR 色彩模式会被
-    // 系统顺手复位，画面随即发灰、面板不再激发。这里先主动钉一次，
-    // 尺寸变化后的 VO 重建在 resizeNativeSurface 的防抖回调里兜底。
-    if (_shouldRebuildVoOnResize) _updateWindowHdrMode(force: true);
+    // 系统顺手复位，画面随即发灰、面板不再激发。这里主动钉一次即可：
+    // 尺寸变化走 android_reconfig，它本来就会重下发 HDR dataspace，不需要
+    // 再 vo=null 重建（重建期间 mpv 会报 buffering）。
+    if (_isVulkanHdrOutput) _updateWindowHdrMode(force: true);
+    // SurfaceView 重建、VO 重新下发期间 mpv 会短暂报 buffering，
+    // 900ms 内不显示加载动画，避免全屏切换闪一下「加载中」。
+    fullScreenTransition.value = true;
+    _fullScreenTransitionTimer?.cancel();
+    _fullScreenTransitionTimer = Timer(const Duration(milliseconds: 900), () {
+      _fullScreenTransitionTimer = null;
+      fullScreenTransition.value = false;
+    });
     // 全屏/退出全屏后留一份快照：设置页只能在离开播放页后打开，
     // 全屏期间的状态必须自己存下来才拿得到。
     _scheduleFullScreenSnapshot();
@@ -4509,6 +4519,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _releaseDoviPlayer();
     _hdrSnapshotTimer?.cancel();
     _fullScreenSnapshotTimer?.cancel();
+    _fullScreenTransitionTimer?.cancel();
+    _fullScreenTransitionTimer = null;
     // 注意：不要在这里抓快照。销毁过程中 surfaceDestroyed 会把 vo 置回 null，
     // 抓到的会是「拆机态」。播放中每 5 秒的快照已经足够还原真实状态。
     _cancelAutoAudioOnlyTimer();

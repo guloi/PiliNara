@@ -2434,11 +2434,15 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         ],
 
         Obx(() {
+          // fullScreenTransition：进出全屏时 SurfaceView 重建、VO 重新下发，
+          // mpv 会短暂报 buffering，这段时间不弹加载动画，免得切全屏闪一下。
           if ((!plPlayerController.suppressBufferingIndicator.value &&
+                  !plPlayerController.fullScreenTransition.value &&
                   plPlayerController.dataStatus.loading) ||
               (plPlayerController.isBuffering.value &&
                   plPlayerController.playerStatus.isPlaying &&
-                  !plPlayerController.suppressBufferingIndicator.value)) {
+                  !plPlayerController.suppressBufferingIndicator.value &&
+                  !plPlayerController.fullScreenTransition.value)) {
             return Center(
               child: GestureDetector(
                 onTap: plPlayerController.refreshPlayer,
