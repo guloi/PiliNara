@@ -4,8 +4,11 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.view.Display
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
@@ -99,6 +102,36 @@ class MainActivity : AudioServiceActivity() {
         return builder.toString()
     }
 
+    /**
+     * 诊断：显示端的 HDR 能力与当前物理模式。
+     *
+     * 面板是否真的进了 HDR，单看 mpv 的参数（target-peak=auto）看不出来：
+     * ANativeWindow_setBuffersGeometry 会把 dataspace 复位，全屏这类尺寸变化
+     * 之后 Vulkan 交换链有可能回落成 SDR。这里把系统侧的判据一并带回去：
+     * window.colorMode=4 且 display.isHdr=true 才说明面板真的被激发。
+     */
+    private fun describeHdrDisplay(): Map<String, Any?> {
+        val out = HashMap<String, Any?>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            out["colorMode"] = window.colorMode
+        }
+        val manager = getSystemService(DisplayManager::class.java)
+        val display = manager?.getDisplay(Display.DEFAULT_DISPLAY) ?: return out
+        out["hdr"] = display.isHdr
+        display.hdrCapabilities?.let { caps ->
+            out["maxLuminance"] = caps.desiredMaxLuminance
+            out["maxAvgLuminance"] = caps.desiredMaxAverageLuminance
+            out["minLuminance"] = caps.desiredMinLuminance
+            out["hdrTypes"] = caps.supportedHdrTypes.joinToString(",")
+        }
+        display.mode?.let { mode ->
+            out["modeWidth"] = mode.physicalWidth
+            out["modeHeight"] = mode.physicalHeight
+            out["refreshRate"] = mode.refreshRate
+        }
+        return out
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -157,6 +190,9 @@ class MainActivity : AudioServiceActivity() {
                     result.success(null)
                 }
                 "setWindowHdr" -> {
+                    // 回读 Window.colorMode（4 = HDR）：部分 ROM 会直接忽略这次
+                    // 请求，Dart 侧只看「已请求」会误判面板已切到 HDR。
+                    var applied = -1
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         runCatching {
                             window.setColorMode(
@@ -166,10 +202,13 @@ class MainActivity : AudioServiceActivity() {
                                     ActivityInfo.COLOR_MODE_DEFAULT
                                 },
                             )
-                        }
+                        }.onFailure { Log.w("PiliNara", "setColorMode failed", it) }
+                        applied = window.colorMode
                     }
-                    result.success(null)
+                    result.success(applied)
                 }
+                // 诊断：显示端 HDR 能力与当前物理模式。
+                "hdrDisplayInfo" -> result.success(describeHdrDisplay())
                 "remove" -> {
                     host.remove(owner = intArg("owner"))
                     result.success(null)

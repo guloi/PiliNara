@@ -413,6 +413,29 @@ BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 RO
 代价是全屏切换时 VO 重建，会有一帧黑；mediacodec_embed 直通与 SDR 纹理路径
 不受影响（仍只写 `android-surface-size`）。
 
+### 7.3 怎么拿到「全屏那一刻」的证据
+
+「HDR 状态诊断」只能在设置页里打开，而设置页会先销毁播放页，所以看到的永远
+是「上次播放的快照」；更麻烦的是退出全屏后每 5 秒一次的定时快照会把全屏期间
+的状态覆盖掉，等于拿不到故障态。现在改成：
+
+* **全屏快照单独保存**：`PlPlayerController._lastFullScreenSnapshot`。播放中
+  每 5 秒的快照按 `isFullScreen` 分流，全屏期间写全屏快照，半屏写「最近一次」
+  快照；诊断页两段一起显示（`lastHdrInfo`），可以直接对比。
+* **进/出全屏 1.8 秒后主动抓一次**：`_setFullScreen` 调
+  `_scheduleFullScreenSnapshot`，此时尺寸防抖（200ms）与 VO 重建都已完成，
+  抓到的才是稳定态；顺带重新下发一次窗口 HDR 色彩模式
+  （`_verifyFullScreenHdr`）。
+* **新增系统侧判据**（原生 `hdrDisplayInfo`，`DisplayManager` +
+  `Display.HdrCapabilities`）：
+  - `窗口 HDR 预切: 是 / 实际 colorMode=N`——`setWindowHdr` 现在会回读
+    `Window.colorMode`（4=HDR，0=默认），ROM 忽略请求时能直接看出来；
+  - `显示端: hdr=…/ 峰值=…nits / 平均=…nits / 模式=WxH@Hz / 支持类型=…`；
+  - `全屏 HDR 自检: …`——全屏稳定后若 `colorMode != 4` 或 `display.isHdr=false`，
+    记一条提示，提示用户把快照发回来。
+
+> 注意：这些值只用于判断，不要拿来自动重建 VO。部分 ROM 的 `Window.colorMode`
+> 回读始终是 0（半屏出画正常时也是 0），当判据会在每次进全屏时多闪黑一帧。
 ## 八、代码位置
 
 | 文件 | 作用 |

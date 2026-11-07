@@ -80,8 +80,19 @@ abstract final class NativeVideoSurfaceChannel {
       channel.invokeMethod<String>('surfaceInfo');
 
   /// 进入 HDR 播放前预切窗口色彩模式，使面板切换发生在加载/黑屏阶段。
-  static Future<void> setWindowHdr({required bool enabled}) =>
-      channel.invokeMethod<void>('setWindowHdr', {'enabled': enabled});
+  ///
+  /// 返回下发后系统回读的 Window.colorMode（4 = HDR，0 = 默认）。部分 ROM
+  /// 会忽略这次请求，只有回读值才能确认面板真的切过去了。
+  static Future<int?> setWindowHdr({required bool enabled}) =>
+      channel.invokeMethod<int>('setWindowHdr', {'enabled': enabled});
+
+  /// 诊断：显示端 HDR 能力与当前物理模式。
+  ///
+  /// 键：colorMode（窗口色彩模式）、hdr（显示端是否处于 HDR）、
+  /// maxLuminance / maxAvgLuminance / minLuminance（nits）、hdrTypes、
+  /// modeWidth / modeHeight / refreshRate。
+  static Future<Map?> hdrDisplayInfo() =>
+      channel.invokeMethod<Map>('hdrDisplayInfo');
 
   /// Media3 DoVi 视频：把视频流交给原生 ExoPlayer 解码到同一个 SurfaceView。
   static Future<bool> doviPrepare({

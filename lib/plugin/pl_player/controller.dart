@@ -1313,7 +1313,24 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 设置页无法在播放时打开（会先销毁播放页），所以播放过程中定时把状态
   /// 存下来，播放结束后仍可在「HDR 状态诊断」里回看。
   static String _lastHdrSnapshot = '';
+
+  /// 全屏期间单独留一份快照。
+  ///
+  /// 设置页只能在离开播放页后打开，而离开前一般会先退出全屏——若只保留
+  /// 「最近一次」快照，退出全屏后的状态会把全屏故障态覆盖掉，于是永远拿不到
+  /// 「全屏时到底哪里不一样」的证据。
+  static String _lastFullScreenSnapshot = '';
   Timer? _hdrSnapshotTimer;
+  Timer? _fullScreenSnapshotTimer;
+
+  /// 全屏后自检发现的问题，写进诊断，下播后仍能看到。
+  String? _hdrSelfCheckNote;
+
+  /// `setWindowHdr` 下发后系统回读的窗口色彩模式（4 = HDR，0 = 默认）。
+  int? _windowHdrColorMode;
+
+  /// 显示端 HDR 能力与当前物理模式（原生回传，随自检一起刷新）。
+  Map? _displayHdrInfo;
 
   /// 当前（或上一次）播放器与 HDR 相关的运行时状态。
   ///
@@ -1325,9 +1342,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 设置页读取用：优先由当前播放器实时生成，播放器已销毁时回退到上次快照。
   ///
   /// 设置页会在打开时销毁播放页，所以不能依赖 [PlPlayerController.instance]。
-  static String get lastHdrInfo => _lastHdrSnapshot.isEmpty
-      ? '播放器尚未初始化。\n请先播放一个视频（播放中无法打开设置页），\n播放几秒后再回到这里查看上次播放的快照。'
-      : '（上次播放的快照）\n$_lastHdrSnapshot';
+  static String get lastHdrInfo {
+    if (_lastHdrSnapshot.isEmpty && _lastFullScreenSnapshot.isEmpty) {
+      return '播放器尚未初始化。\n请先播放一个视频（播放中无法打开设置页），'
+          '\n播放几秒后再回到这里查看上次播放的快照。';
+    }
+    return [
+      if (_lastFullScreenSnapshot.isNotEmpty) '（全屏时的快照）\n$_lastFullScreenSnapshot',
+      if (_lastHdrSnapshot.isNotEmpty) '（最近一次快照）\n$_lastHdrSnapshot',
+    ].join('\n\n');
+  }
 
   String _nativeRectLabel(ui.Rect? rect) {
     if (rect == null) return '-';
@@ -1338,6 +1362,19 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   String _sizeLabel(ui.Size? size) {
     if (size == null) return '-';
     return '${size.width.toStringAsFixed(0)}x${size.height.toStringAsFixed(0)}';
+  }
+
+  /// 显示端 HDR 能力与当前物理模式（原生回传）。
+  ///
+  /// 面板真正被激发时 hdr 为 true、colorMode 为 4；片源明明是 HDR 而这里
+  /// 仍是 SDR，说明窗口/VO 没有把 HDR 交给系统，画面会被按 SDR 处理而发暗。
+  String _displayHdrLabel(Map info) {
+    final mode =
+        '${info['modeWidth'] ?? '-'}x${info['modeHeight'] ?? '-'}@${info['refreshRate'] ?? '-'}Hz';
+    return '显示端: hdr=${info['hdr'] ?? '-'} / '
+        '峰值=${info['maxLuminance'] ?? '-'} / '
+        '平均=${info['maxAvgLuminance'] ?? '-'} nits / '
+        '模式=$mode / 支持类型=${info['hdrTypes'] ?? '-'}';
   }
 
   /// 诊断里「是否真的发生过自动回退」。
@@ -1454,7 +1491,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'target-peak: ${read('target-peak')}',
       'target-colorspace-hint: ${read('target-colorspace-hint')}',
       'target-prim/target-trc: ${read('target-prim')} / ${read('target-trc')}',
-      '窗口 HDR 预切: ${_windowHdrRequested ? '是' : '否'}',
+      '窗口 HDR 预切: ${_windowHdrRequested ? '是' : '否'} / '
+          '实际 colorMode=${_windowHdrColorMode ?? '-'}（4=HDR，0=默认）',
+      if (_displayHdrInfo != null) _displayHdrLabel(_displayHdrInfo!),
+      if (_hdrSelfCheckNote != null) '全屏 HDR 自检: $_hdrSelfCheckNote',
       '杜比视界: $doviLabel',
       'dither: ${read('dither')}',
       'HDR 开关: ${Pref.enableHdr ? '开' : '关'}，'
@@ -1476,12 +1516,72 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 播放期间每 5 秒刷新一次 [hdrDebugInfo] 快照，供下播后查看。
   void _startHdrSnapshot() {
     _hdrSnapshotTimer?.cancel();
+    _fullScreenSnapshotTimer?.cancel();
     _hdrSnapshotTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_videoPlayerController == null) return;
       final info = hdrDebugInfo;
-      _lastHdrSnapshot = info;
-      debugPrint('[HDR] snapshot\n$info');
+      // 全屏与半屏分开存：退出全屏后的快照不能覆盖全屏故障态。
+      if (isFullScreen.value) {
+        _lastFullScreenSnapshot = info;
+        debugPrint('[HDR] fullscreen snapshot\n$info');
+      } else {
+        _lastHdrSnapshot = info;
+        debugPrint('[HDR] snapshot\n$info');
+      }
     });
+  }
+
+  /// 全屏切换后抓一次快照并复查 HDR 出画。
+  ///
+  /// 尺寸变化防抖 200ms、Vulkan VO 重建都要时间，抓得太早读到的是重建
+  /// 过程中的状态；1.8s 后基本稳定，反映的才是「全屏播放时」的真实参数。
+  void _scheduleFullScreenSnapshot() {
+    _fullScreenSnapshotTimer?.cancel();
+    _fullScreenSnapshotTimer = Timer(const Duration(milliseconds: 1800), () {
+      _fullScreenSnapshotTimer = null;
+      if (_videoPlayerController == null) return;
+      unawaited(() async {
+        await _probeNativeSurface();
+        if (_videoPlayerController == null) return;
+        await _verifyFullScreenHdr();
+        final info = hdrDebugInfo;
+        if (isFullScreen.value) {
+          _lastFullScreenSnapshot = info;
+          debugPrint('[HDR] fullscreen snapshot\n$info');
+        } else {
+          _lastHdrSnapshot = info;
+          debugPrint('[HDR] snapshot\n$info');
+        }
+      }());
+    });
+  }
+
+  /// 全屏稳定后的 HDR 复查（只记录，不重建）。
+  ///
+  /// 全屏会改 SurfaceView 尺寸，android_reconfig 会重新下发 setBuffersGeometry
+  /// 与 dataspace（见 context_android.c 的 android_apply_hdr_window）。这里做两件
+  /// 事：把窗口 HDR 色彩模式重新钉一次（部分 ROM 会在尺寸/方向变化后复位），
+  /// 再把显示端的实际状态记进诊断。
+  ///
+  /// 注意不要根据这些值自动重建 VO：部分 ROM 的 Window.colorMode 回读始终是
+  /// 0（半屏出画正常时也是 0），拿它当判据会在每次进全屏时多闪黑一帧。
+  Future<void> _verifyFullScreenHdr() async {
+    if (_videoPlayerController == null || !isFullScreen.value) return;
+    if (_shouldRebuildVoOnResize) _updateWindowHdrMode(force: true);
+    final display = await NativeVideoSurfaceChannel.hdrDisplayInfo();
+    if (display != null) _displayHdrInfo = display;
+    final colorMode = (_displayHdrInfo?['colorMode'] as num?)?.toInt();
+    if (colorMode != null) _windowHdrColorMode = colorMode;
+    final displayHdr = _displayHdrInfo?['hdr'] as bool?;
+    final suspect = (colorMode != null && colorMode != 4) || displayHdr == false;
+    _hdrSelfCheckNote = suspect
+        ? '全屏后显示端未报告 HDR（colorMode=$colorMode hdr=$displayHdr），'
+              '若画面同时变暗，请把这份快照反馈'
+        : null;
+    debugPrint(
+      '[HDR] fullscreen check colorMode=$colorMode displayHdr=$displayHdr '
+      'suspect=$suspect',
+    );
   }
 
   /// 设置页修改 HDR / 杜比视界选项后调用，使参数立即作用于当前播放器。
@@ -1889,6 +1989,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _lastProbeAlpha = alpha;
     _lastProbeParent = parent;
     _lastProbeWindowColorMode = windowColorMode;
+    if (windowColorMode != null) _windowHdrColorMode = windowColorMode;
+    // 显示端是否真的进了 HDR，是「面板有没有被激发」最直接的判据。
+    final display = await NativeVideoSurfaceChannel.hdrDisplayInfo();
+    if (display != null) _displayHdrInfo = display;
+    debugPrint(
+      '[HDR] display hdr=${display?['hdr']} '
+      'colorMode=${display?['colorMode']} '
+      'maxLuminance=${display?['maxLuminance']} '
+      'mode=${display?['modeWidth']}x${display?['modeHeight']}@${display?['refreshRate']}',
+    );
   }
 
   /// 按当前片源预切/复位窗口 HDR 模式。
@@ -1917,14 +2027,30 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       '[HDR] window color mode=$wanted backend=${backend.value} '
       'hdr=$isHdrSource dovi=$isDolbyVisionSource media3=$_useMedia3Dovi',
     );
-    unawaited(NativeVideoSurfaceChannel.setWindowHdr(enabled: wanted));
+    unawaited(_applyWindowHdr(wanted));
+  }
+
+  /// 下发窗口 HDR 色彩模式，并记下系统回读的 Window.colorMode。
+  ///
+  /// 回读值才是「面板有没有真的切过去」的判据：部分 ROM 会直接忽略
+  /// `setColorMode(COLOR_MODE_HDR)`，只记录「已请求」会让诊断误判。
+  Future<void> _applyWindowHdr(bool enabled) async {
+    try {
+      final mode = await NativeVideoSurfaceChannel.setWindowHdr(
+        enabled: enabled,
+      );
+      _windowHdrColorMode = mode;
+      debugPrint('[HDR] window color mode=$enabled applied=$mode');
+    } catch (e) {
+      debugPrint('[HDR] setWindowHdr failed: $e');
+    }
   }
 
   /// 播放页销毁时复位窗口 HDR 模式，避免设置页/首页停留在 HDR 窗口模式。
   void _resetWindowHdr() {
     if (!_windowHdrRequested) return;
     _windowHdrRequested = false;
-    unawaited(NativeVideoSurfaceChannel.setWindowHdr(enabled: false));
+    unawaited(_applyWindowHdr(false));
   }
 
   void _releaseDoviPlayer() {
@@ -2781,6 +2907,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     try {
       _removeListeners();
       _hdrSnapshotTimer?.cancel();
+      _fullScreenSnapshotTimer?.cancel();
       // 保留已经挂上的原生 SurfaceView：重建后仍要在同一块 Surface 上出画。
       _resetNativeSurfaceState(keepSurface: true);
       _setVideoController(null);
@@ -2828,6 +2955,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     debugPrint('[HDR] output switch: native=$wantNative');
     _removeListeners();
     _hdrSnapshotTimer?.cancel();
+    _fullScreenSnapshotTimer?.cancel();
     _resetNativeSurfaceState();
     _setVideoController(null);
     _videoPlayerController = null;
@@ -3821,6 +3949,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 系统顺手复位，画面随即发灰、面板不再激发。这里先主动钉一次，
     // 尺寸变化后的 VO 重建在 resizeNativeSurface 的防抖回调里兜底。
     if (_shouldRebuildVoOnResize) _updateWindowHdrMode(force: true);
+    // 全屏/退出全屏后留一份快照：设置页只能在离开播放页后打开，
+    // 全屏期间的状态必须自己存下来才拿得到。
+    _scheduleFullScreenSnapshot();
     onFullScreenChanged?.call(val);
   }
 
@@ -4377,6 +4508,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _doviDisposed = true;
     _releaseDoviPlayer();
     _hdrSnapshotTimer?.cancel();
+    _fullScreenSnapshotTimer?.cancel();
     // 注意：不要在这里抓快照。销毁过程中 surfaceDestroyed 会把 vo 置回 null，
     // 抓到的会是「拆机态」。播放中每 5 秒的快照已经足够还原真实状态。
     _cancelAutoAudioOnlyTimer();
