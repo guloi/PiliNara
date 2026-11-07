@@ -284,13 +284,14 @@ class _UgcIntroPanelState extends State<UgcIntroPanel> {
             style: TextStyle(fontSize: 14, color: colorScheme.secondary),
           ),
         ),
-        GestureDetector(
-          onTap: () => Utils.copyText('av${introController.aid}'),
-          child: Text(
-            'av${introController.aid}',
-            style: TextStyle(fontSize: 14, color: colorScheme.secondary),
+        if (!Pref.hideAvNumber)
+          GestureDetector(
+            onTap: () => Utils.copyText('av${introController.aid}'),
+            child: Text(
+              'av${introController.aid}',
+              style: TextStyle(fontSize: 14, color: colorScheme.secondary),
+            ),
           ),
-        ),
       ],
     ),
     if (videoDetail.descV2 case final descV2? when descV2.isNotEmpty) ...[

@@ -1910,6 +1910,21 @@ abstract final class Pref {
       _setting.put(SettingBoxKey.bvJumpToastText, value);
 
 
+  static bool get allowAv =>
+      _setting.get(SettingBoxKey.allowAv,
+          defaultValue:false);
+
+  static set allowAv(bool value) =>
+      _setting.put(SettingBoxKey.allowAv, value);
+
+  static bool get hideAvNumber =>
+      _setting.get(SettingBoxKey.hideAvNumber,
+          defaultValue:false);
+
+  static set hideAvNumber(bool value) =>
+      _setting.put(SettingBoxKey.hideAvNumber, value);
+
+
   static String get bvJumpWaitSec {
     final value = _setting.get(
       SettingBoxKey.bvJumpWaitSec,

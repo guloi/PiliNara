@@ -227,7 +227,8 @@ abstract final class SettingBoxKey {
       blockAtOnlyReply = 'blockAtOnlyReply',
       blockReplyAtCount = 'blockReplyAtCount',
       filterIntro = 'filterIntro',
-      showRefreshFAB = 'showRefreshFAB';
+      showRefreshFAB = 'showRefreshFAB',
+      hideAvNumber = 'hideAvNumber';
 
   static const String enableAiChat = 'enableAiChat',
       aiApiUrl = 'aiApiUrl',
@@ -370,7 +371,8 @@ abstract final class SettingBoxKey {
       jumpDirec = 'jumpDirec',
       bvJumpToastText = 'bvJumpToastText',
       bvJumpWaitSec = 'bvJumpWaitSec',
-      shouldJumpEveryTime = 'shouldJumpEveryTime';
+      shouldJumpEveryTime = 'shouldJumpEveryTime',
+      allowAv = 'allowAv';
   static const String portraitSlideVideo = 'portraitSlideVideo',
       portraitRC = 'portraitRC',
       portraitNewv = 'portraitNewv',

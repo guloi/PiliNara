@@ -117,6 +117,13 @@ class _BvSwitchDialogState extends State<_BvSwitchDialog> {
                     contentPadding: const EdgeInsets.symmetric(horizontal: 24),
                     onChanged: (_) => setState(() {}),
                   ),
+                  const SetSwitchItem(
+                    title: '允许AV号',
+                    subtitle: '允许跳转av号',
+                    setKey: SettingBoxKey.allowAv,
+                    defaultVal: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 24),
+                  ),
                   SetSwitchItem(
                     title: '每次启动时跳转',
                     subtitle: '启动时将忽略上次的BV号/链接${Pref.jumpDirec ? '然后直接跳转' : '并显示跳转选项'}',

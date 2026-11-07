@@ -8,12 +8,12 @@ import 'package:PiliPlus/common/widgets/action_toast.dart';
 
 final _urlPattern = RegExp(r'https?://\S*(?:bilibili\.com|b23\.tv)/\S*');
 final _bvPattern = RegExp(r'[Bb][Vv]1[0-9A-Za-z]{9}');
+final _avPattern = RegExp(r'[Aa][Vv][0-9]+');
 
 abstract final class ClipboardBv {
-  
 
   static Future<void> check([bool ilast = false]) async {
-    if (!Pref.bvJump) return;
+    if (!Pref.bvJump && !Pref.allowAv) return;
 
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
     if (text == null || text.isEmpty) return;
@@ -23,21 +23,30 @@ abstract final class ClipboardBv {
     }
     final url = _urlPattern.firstMatch(text)?.group(0);
     final bvid = _bvPattern.firstMatch(text)?.group(0);
-    final target = url ??
-        (bvid == null ? null : 'https://www.bilibili.com/video/$bvid');
+    final avid = Pref.allowAv ? _avPattern.firstMatch(text)?.group(0) : null;
+
+    String? target = url;
+    target ??= bvid != null ? 'https://www.bilibili.com/video/$bvid' : null;
+    target ??= avid != null ? 'https://www.bilibili.com/video/$avid' : null;
 
     if (target == null) return;
+    await _openVideo(target, text);
+  }
 
+  static Future<void> _openVideo(String target, String text) async {
     Pref.lastBvClipboard = text;
 
     if (Pref.jumpDirec) {
       await _openUrl(target);
-    }else{
-        final ok = await showActionToast(msg: '是否跳转到来自剪切板的视频?', actionText: '跳转', sec: Pref.bvJumpWaitSec);
-        if (ok) await _openUrl(target);
+    } else {
+      final ok = await showActionToast(
+        msg: '是否跳转到来自剪切板的视频?',
+        actionText: '跳转',
+        sec: Pref.bvJumpWaitSec,
+      );
+      if (ok) await _openUrl(target);
     }
   }
-
   static Future<void> _openUrl(String url) async {
     final handled = await PiliScheme.routePushFromUrl(url, selfHandle: true);
     if (handled) {
