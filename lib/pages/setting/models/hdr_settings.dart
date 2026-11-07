@@ -130,6 +130,18 @@ List<SettingsModel> get hdrSettings => [
         '当前：${Pref.doviAudioOffset} ms（仅 profile 5 Media3 路径；正值让视频目标位置更靠后）',
     onTap: _showDoviAudioOffsetDialog,
   ),
+  SwitchModel(
+    title: '（诊断）全屏半分辨率出画',
+    subtitle:
+        '全屏时仍按半屏的像素尺寸写 mpv 交换链，由系统放大到全屏。'
+        '用于排查 gpu-next 全屏变暗到底是交换链尺寸还是合成路径导致：'
+        '开启后若全屏亮度正常，说明与图层/交换链尺寸有关。',
+    leading: const Icon(Icons.fullscreen_exit),
+    setKey: SettingBoxKey.hdrFullScreenHalfRes,
+    defaultVal: false,
+    onChanged: (value) =>
+        PlPlayerController.instance?.refreshNativeSurfaceSizeDebug(),
+  ),
   NormalModel(
     title: 'HDR 状态诊断',
     subtitle: '查看当前片源的 mpv 色彩、解码方式与色调映射参数，用于排查 HDR 不生效',

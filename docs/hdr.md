@@ -475,12 +475,43 @@ mpv 客户端的日志级别由 `PlayerConfiguration.logLevel` 决定（默认 r
 它就是 libplacebo 实际出画的色彩空间，`pq` + `bt.2020` 说明 HDR 确实交给了
 交换链；若变成 `bt.1886` / `bt.709`，说明被 tone map 回了 SDR。
 
-`PlPlayerController._mpvVoLog` 把 `vo*` / `vulkan*` 前缀、含
-swapchain / color / hdr / dataspace / reconfig / resize / format 的日志（**不限
-level**，因为面配置是 info 级）留最近 20 条，并把应用侧动作也插进去做时间线：
+`PlPlayerController._mpvVoLog` 只按前缀（`vo` / `vulkan`）和
+`libplacebo` / `androidvk` 关键字收集，**不限 level**（面配置是 info 级），留最近 40 条，
+并把应用侧动作也插进去做时间线：
 `--- 全屏=true`、`--- android-surface-size 2400x1080`、`--- windowHdr=true
 applied=0`、`--- VO 重建 wid=… vo=…`。这些行会拼在「HDR 状态诊断」末尾
 （`mpv VO 日志（最近 N 条）`）。
+
+### 7.6 全屏变暗：先分清「交换链尺寸」与「合成路径」
+
+到最新一版快照为止，两个状态里能拿到的证据完全一致：
+
+* 窗口 `colorMode=2`（HDR）两态相同，显示端 `hdr=true`、峰值 2000 nits；
+* `video-out-params` 两态都是 `bt.2020 / pq / limited`，没有回落 SDR；
+* 半屏 `Picked surface configuration 61: VK_FORMAT_A2B10G10R10_UNORM_PACK32 +
+  VK_COLOR_SPACE_HDR10_ST2084_EXT`，全屏那次没有再打印 `Picked surface configuration`。
+
+最后一条**不代表**全屏没重建交换链：libplacebo v7.360.1 的
+`src/vulkan/swapchain.c` 里 `pick_surf_format()` 只在「选中的格式/色彩空间真的变了」时才
+`PL_INFO` 并置 `needs_recreate`；而 `vk_sw_resize()` 只要 `width/height` 变了就会
+`vk_sw_recreate()`（那行是 debug 级，诊断里看不到）。所以全屏是按 2528x1264
+**重建了一张同样格式**的 10bit HDR10 交换链。
+
+格式、dataspace、窗口 HDR 模式都一样之后，两态唯一剩下的差异就是**图层/交换链的像素尺寸**
+（2528x1264 vs 1264x632）。「mediacodec_embed 全屏正常」不能排除尺寸：直通路径的图层尺寸
+虽然相同，但缓冲是解码器给的 YUV（P010），走的是另一条硬件合成路径。
+
+定位开关：「设置 → HDR / 杜比视界 →（诊断）全屏半分辨率出画」
+（`SettingBoxKey.hdrFullScreenHalfRes` / `Pref.hdrFullScreenHalfRes` /
+`PlPlayerController._effectiveSurfaceSize()`、`refreshNativeSurfaceSizeDebug()`）。
+打开后全屏写入的 `--android-surface-size` 与半屏一样，由 SurfaceFlinger 把
+1264x632 的 HDR 缓冲放大到全屏：
+
+* 亮度恢复正常 → 与交换链/图层尺寸有关（DPU 对大尺寸 10bit RGB HDR 图层的处理、
+  或回退到 GPU 合成），可以把「全屏时限制交换链尺寸」做成正式策略；
+* 依旧偏暗 → 与尺寸无关，问题在 Vulkan 缓冲被合成的方式（同尺寸的 mediacodec
+  直通是正常的），需要往 mpv/libplacebo 侧改（例如换 LINEAR 色彩空间面，或补 HDR
+  静态元数据）。
 
 ## 八、代码位置
 

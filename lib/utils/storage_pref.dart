@@ -1344,6 +1344,13 @@ abstract final class Pref {
   static bool get hdrSurface =>
       _setting.get(SettingBoxKey.hdrSurface, defaultValue: true);
 
+  /// 诊断开关：全屏时仍按半屏的像素尺寸出画（由系统放大到全屏）。
+  ///
+  /// 用来区分「HDR 交换链尺寸」与「SurfaceFlinger 合成路径」对全屏亮度的
+  /// 影响：开启后全屏写入的 `--android-surface-size` 与半屏完全相同。
+  static bool get hdrFullScreenHalfRes =>
+      _setting.get(SettingBoxKey.hdrFullScreenHalfRes, defaultValue: false);
+
   /// 目标峰值亮度（nits），`0` 表示自动。
   static int get hdrTargetPeak =>
       _setting.get(SettingBoxKey.hdrTargetPeak, defaultValue: 0);

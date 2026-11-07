@@ -23,6 +23,7 @@ abstract final class SettingBoxKey {
       hdrHwdecMode = 'hdrHwdecMode',
       hdrBackend = 'hdrBackend',
       hdrSurface = 'hdrSurface',
+      hdrFullScreenHalfRes = 'hdrFullScreenHalfRes',
       dolbyVisionFallback = 'dolbyVisionFallback',
       media3Dovi = 'media3Dovi',
       doviAudioOffset = 'doviAudioOffset',

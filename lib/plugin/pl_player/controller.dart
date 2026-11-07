@@ -2221,6 +2221,26 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // seek/调速，否则会周期性卡顿、定格。
   }
 
+  /// 实际下发给 mpv 的交换链尺寸。
+  ///
+  /// 诊断开关「全屏半分辨率出画」打开后，全屏时延用半屏的像素尺寸：
+  /// 交换链仍是 1264x632 这类小尺寸 HDR 缓冲，由 SurfaceFlinger 放大到全屏。
+  /// 若这样全屏亮度恢复正常，说明偏暗与交换链/图层尺寸有关；若依旧偏暗，
+  /// 则问题在合成或面板侧。见 docs/hdr.md 7.6。
+  (int, int) _effectiveSurfaceSize((int, int) size) {
+    if (!Pref.hdrFullScreenHalfRes || !isFullScreen.value) return size;
+    final halfW = (size.$1 / 2).round();
+    final halfH = (size.$2 / 2).round();
+    if (halfW < 2 || halfH < 2) return size;
+    return (halfW, halfH);
+  }
+
+  /// 诊断开关切换后按新策略重新下发一次尺寸（否则要等下一次布局变化）。
+  void refreshNativeSurfaceSizeDebug() {
+    _appliedSurfaceSize = null;
+    _applyNativeSurface();
+  }
+
   /// 更新 SurfaceView 的布局尺寸。
   ///
   /// 防抖 200ms：小窗拖动/全屏动画期间尺寸逐帧变化，逐帧改
@@ -2239,14 +2259,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       final player = _videoPlayerController;
       final size = _nativeSurfaceSize;
       if (player == null || size == null) return;
-      if (_appliedSurfaceSize == size) return;
       // 只改尺寸，不重建 VO：mpv 会走 android_reconfig，那里已经重新
       // setBuffersGeometry 并重下发 HDR dataspace。vo=null 重建会让 mpv
       // 在重建期间报 buffering，进出全屏就闪一下加载动画。
-      _noteVoLog('--- android-surface-size ${size.$1}x${size.$2}');
+      final eff = _effectiveSurfaceSize(size);
+      if (_appliedSurfaceSize == eff) return;
+      _noteVoLog('--- android-surface-size ${eff.$1}x${eff.$2}');
       try {
-        player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
-        _appliedSurfaceSize = size;
+        player.setProperty('android-surface-size', '${eff.$1}x${eff.$2}');
+        _appliedSurfaceSize = eff;
       } catch (_) {}
     });
   }
@@ -2289,6 +2310,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final size = _nativeSurfaceSize;
     if (player == null || wid == null || size == null) return;
     if (size.$1 <= 1 || size.$2 <= 1) return;
+    final eff = _effectiveSurfaceSize(size);
     final backend = _renderBackend;
     final vo = backend.vo;
     // gpu-next 与 gpu-next-gl 的 vo 都是 gpu-next，只有 gpu-api 不同；
@@ -2298,12 +2320,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         _appliedVo != vo ||
         _appliedBackend != backend;
     try {
-      if (!needVo && _appliedSurfaceSize != size) {
-        player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
-        _appliedSurfaceSize = size;
+      if (!needVo && _appliedSurfaceSize != eff) {
+        player.setProperty('android-surface-size', '${eff.$1}x${eff.$2}');
+        _appliedSurfaceSize = eff;
       }
       if (needVo) {
-        _noteVoLog('--- VO 重建 wid=$wid vo=$vo ${size.$1}x${size.$2}');
+        _noteVoLog('--- VO 重建 wid=$wid vo=$vo ${eff.$1}x${eff.$2}');
         // 顺序很重要：先复位 vo，再写 gpu-api/gpu-context 等初始化参数，
         // 然后给 wid，最后才设置 vo。gpu-context 只能在 VO 创建前生效；
         // media_kit 创建 VideoController 时会把 gpu-context 覆盖成 android，
@@ -2312,9 +2334,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         // android_reconfig 去动正在出画的窗口。
         player.setProperty('vo', 'null');
         _applyHdrProperties(player, hdrSurface: true);
-        if (_appliedSurfaceSize != size) {
-          player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
-          _appliedSurfaceSize = size;
+        if (_appliedSurfaceSize != eff) {
+          player.setProperty('android-surface-size', '${eff.$1}x${eff.$2}');
+          _appliedSurfaceSize = eff;
         }
         player.setProperty('wid', '$wid');
         player.setProperty('vid', 'auto');
@@ -2331,7 +2353,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         [
           '[HDR] nativeSurface vo=$vo',
           'wid=$wid',
-          'surface=${size.$1}x${size.$2}',
+          'surface=${eff.$1}x${eff.$2}',
         ].join(' '),
       );
       if (needVo && backend == HdrBackend.gpuNext && player.state.playing) {
