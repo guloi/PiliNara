@@ -387,6 +387,7 @@ class AudioController extends GetxController
     );
     await player!.open(
       Media(url, start: _start, extras: audioFilterExtras(volume)),
+      play: false,
     );
     await onPlay();
     _start = null;

@@ -209,6 +209,7 @@ abstract final class SettingBoxKey {
       appVolume = 'appVolume',
       enableVolumeBoost = 'enableVolumeBoost',
       downloadPath = 'downloadPath',
+      cachePlayInfo = 'cachePlayInfo',
       imageSavePath = 'imageSavePath',
       followOrderType = 'followOrderType',
       enableImgMenu = 'enableImgMenu',
@@ -364,6 +365,7 @@ abstract final class SettingBoxKey {
       swapReplyLikeDislike = 'swapReplyLikeDislike',
       remarkReplaceName = 'remarkReplaceName',
       appFont = 'appFont',
+      foldDepth = 'foldDepth',
       customAppFont = 'customAppFont',
       customAppFontNames = 'customAppFontNames';
   static const String bvJump = 'bvJump',

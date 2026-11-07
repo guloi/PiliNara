@@ -89,6 +89,16 @@ class DetailItem extends StatelessWidget {
     ),
   );
 
+  Future<void> _onUpdate(Future<bool> Function() onUpdate) async {
+    Get.back();
+    final res = await onUpdate();
+    if (res) {
+      SmartDialog.showToast('更新成功');
+    } else {
+      SmartDialog.showToast('更新失败');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -96,11 +106,68 @@ class DetailItem extends StatelessWidget {
     final cid = entry.source?.cid ?? entry.pageData?.cid;
     final canActInPlace = entry.isCompleted || onDelete != null;
     final enableMultiSelect = controller.enableMultiSelect.value;
+    final canDel = onDelete != null;
+
     void onLongPress() {
       if (enableMultiSelect) {
         return;
       }
-      customOnLongPress?.call();
+      if (customOnLongPress != null) {
+        customOnLongPress!.call();
+        return;
+      }
+      if (!canDel) {
+        return;
+      }
+      showDialog(
+        context: context,
+        builder: (context) => SimpleDialog(
+          clipBehavior: Clip.hardEdge,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          children: [
+            DialogOption(
+              onPressed: () {
+                Get.back();
+                showConfirmDialog(
+                  context: context,
+                  title: const Text('确定删除该视频？'),
+                  onConfirm: onDelete,
+                );
+              },
+              child: const Text('删除'),
+            ),
+            DialogOption(
+              onPressed: () => _onUpdate(
+                () => downloadService.downloadDanmaku(
+                  entry: entry,
+                  isUpdate: true,
+                ),
+              ),
+              child: const Text('更新弹幕'),
+            ),
+            if (entry.segments != null)
+              DialogOption(
+                onPressed: () {
+                  Get.back();
+                  showSegmentsDetail(context);
+                },
+                child: const Text('空降片段'),
+              ),
+            if (entry.isCompleted) ...[
+              DialogOption(
+                onPressed: () =>
+                    _onUpdate(() => downloadService.updateSegments(entry)),
+                child: const Text('更新空降片段'),
+              ),
+              DialogOption(
+                onPressed: () =>
+                    _onUpdate(() => downloadService.updatePlayInfo(entry)),
+                child: const Text('更新字幕、分段信息'),
+              ),
+            ],
+          ],
+        ),
+      );
     }
 
     return Material(
@@ -145,11 +212,8 @@ class DetailItem extends StatelessWidget {
                 }
               }
             : null,
-        onLongPress: enableTap && customOnLongPress != null
-            ? onLongPress
-            : null,
-        onSecondaryTap:
-            !enableTap || PlatformUtils.isMobile || customOnLongPress == null
+        onLongPress: enableTap ? onLongPress : null,
+        onSecondaryTap: !enableTap || PlatformUtils.isMobile
             ? null
             : onLongPress,
         child: Padding(

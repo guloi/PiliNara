@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:convert' show jsonDecode;
+import 'dart:convert' show utf8, jsonDecode;
 import 'dart:io';
 import 'dart:math' show Random, min;
 import 'dart:ui';
@@ -78,6 +78,7 @@ import 'package:PiliPlus/utils/reply_scheme_helper.dart';
 import 'package:PiliPlus/utils/storage.dart';
 import 'package:PiliPlus/utils/storage_key.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
+import 'package:PiliPlus/utils/subtitle_utils.dart';
 import 'package:PiliPlus/utils/theme_utils.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:PiliPlus/utils/video_utils.dart';
@@ -85,7 +86,7 @@ import 'package:collection/collection.dart';
 import 'package:dio/dio.dart' show Options;
 import 'package:extended_nested_scroll_view/extended_nested_scroll_view.dart'
     show ExtendedNestedScrollViewState;
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, compute;
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
 import 'package:get/get.dart';
@@ -93,6 +94,8 @@ import 'package:hive_ce/hive.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart' hide Subtitle;
 import 'package:path/path.dart' as path;
+
+typedef SubtitleData = ({bool isData, String id});
 
 class VideoDetailController extends GetxController
     with GetTickerProviderStateMixin, BlockMixin {
@@ -411,6 +414,7 @@ class VideoDetailController extends GetxController
 
   void initFileSource(BiliDownloadEntryInfo entry) {
     this.entry = entry;
+    // block
     _initLocalSkipIfNeeded();
     final localQa = VideoQuality.fromCode(
       entry.videoQuality ?? entry.preferedVideoQuality,
@@ -423,6 +427,24 @@ class VideoDetailController extends GetxController
       VideoQuality.hdrVivid => 'hvc1.2',
       _ => null,
     };
+    // viewPoint
+    final viewPoints = entry.viewPoints;
+    if (viewPoints != null && viewPoints.isNotEmpty) {
+      try {
+        final duration = (entry.totalTimeMilli / 1000);
+        viewPointList.value = viewPoints
+            .map((e) => e.toSegment(duration))
+            .toList();
+      } catch (_) {
+        if (kDebugMode) rethrow;
+      }
+    }
+    // subtitle
+    final subtitles = entry.subtitles;
+    if (subtitles != null && subtitles.isNotEmpty) {
+      this.subtitles.assignAll(subtitles);
+      vttSubtitlesIndex.value = 0;
+    }
     firstVideo = VideoItem(
       id: entry.preferedVideoQuality,
       quality: localQa,
@@ -1401,10 +1423,7 @@ class VideoDetailController extends GetxController
     }
   }
 
-  RxList<Subtitle> subtitles = RxList<Subtitle>();
   final danmakuMaskController = DanmakuMaskController();
-  final Map<int, ({bool isData, String id})> vttSubtitles = {};
-  late final RxInt vttSubtitlesIndex = (-1).obs;
   late final RxBool showVP = Pref.showViewPointsOverlay.obs;
   late final RxList<ViewPointSegment> viewPointList = <ViewPointSegment>[].obs;
 
@@ -1538,18 +1557,45 @@ class VideoDetailController extends GetxController
     if (!isClosed) await setSubtitle(idx);
   }
 
+  final RxList<Subtitle> subtitles = RxList<Subtitle>();
+  final Map<int, SubtitleData> vttSubtitles = {};
+  late final vttSubtitlesIndex = (-1).obs;
+  Future<SubtitleData?> loadFileSubtitle({
+    required String path,
+    required String fileName,
+  }) async {
+    SubtitleData? data;
+    final length = subtitles.length;
+    if (SubtitleUtils.isJson(fileName)) {
+      final file = File(path);
+      final stream = file.openRead().transform(utf8.decoder);
+      final buffer = StringBuffer();
+      await for (final chunk in stream) {
+        if (isClosed) return null;
+        buffer.write(chunk);
+      }
+      if (isClosed) return null;
+      String sub = buffer.toString();
+      sub = await compute<List, String>(
+        SubtitleUtils.json2Vtt,
+        jsonDecode(sub)['body'],
+      );
+      if (isClosed) return null;
+      data = (isData: true, id: sub);
+      vttSubtitles[length] = data;
+    } else {
+      data = (isData: false, id: path);
+      vttSubtitles[length] = data;
+    }
+    return data;
+  }
+
   // 设定字幕轨道
   Future<void> setSubtitle(int index) async {
     if (index <= 0) {
       await plPlayerController.videoPlayerController?.setSubtitleTrack(.no());
       vttSubtitlesIndex.value = index;
       return;
-    }
-
-    // 防御性兜底:主副不能同轨。正常路径下选择器已将副字幕所在轨置灰,
-    // 此处仅防绕过 UI 的调用或面板打开期间的状态竞态;冲突时副字幕让位。
-    if (index == vttSecondarySubtitlesIndex.value) {
-      await setSecondarySubtitle(0);
     }
 
     final subUri = await _resolveVttUri(index - 1);
@@ -1587,18 +1633,25 @@ class VideoDetailController extends GetxController
   }
 
   /// 取 subtitles[subIdx] 的 VTT 播放地址(本地文件路径或 memory:// 数据),
-  /// 网络字幕转换结果缓存于 [vttSubtitles]。
+  /// 本地字幕文件与网络字幕转换结果都缓存于 [vttSubtitles]。
   Future<String?> _resolveVttUri(int subIdx) async {
-    ({bool isData, String id})? subtitle = vttSubtitles[subIdx];
+    SubtitleData? subtitle = vttSubtitles[subIdx];
     if (subtitle == null) {
-      final result = await VideoHttp.getSubtitles(
-        subtitles[subIdx].subtitleUrl!,
-      );
-      if (result == null) return null;
-      subtitle = (isData: true, id: result);
-      vttSubtitles[subIdx] = subtitle;
+      final rawSub = subtitles[subIdx];
+      if (rawSub is LocalSubtitle) {
+        subtitle = await loadFileSubtitle(
+          path: rawSub.path,
+          fileName: PathUtils.subtitleExt,
+        );
+      } else {
+        final result = await VideoHttp.getSubtitles(rawSub.subtitleUrl!);
+        if (result == null) return null;
+        subtitle = (isData: true, id: result);
+        vttSubtitles[subIdx] = subtitle;
+      }
     }
-    return subtitle.isData ? 'memory://${subtitle.id}' : subtitle.id;
+    if (subtitle == null) return null;
+    return subtitle.isData ? 'memory://@{subtitle.id}' : subtitle.id;
   }
 
   // interactive video
@@ -1726,16 +1779,10 @@ class VideoDetailController extends GetxController
       if (plPlayerController.showViewPoints &&
           response.viewPoints?.firstOrNull?.type == 2) {
         try {
-          viewPointList.value = response.viewPoints!.map((item) {
-            final end = (item.to! / (data.timeLength! / 1000)).clamp(0.0, 1.0);
-            return ViewPointSegment(
-              end: end,
-              title: item.content,
-              url: item.imgUrl,
-              from: item.from,
-              to: item.to,
-            );
-          }).toList();
+          final duration = (data.timeLength! / 1000);
+          viewPointList.value = response.viewPoints!
+              .map((e) => e.toSegment(duration))
+              .toList();
         } catch (_) {}
       }
 
@@ -1744,24 +1791,9 @@ class VideoDetailController extends GetxController
       } else if (!Accounts.heartbeat.isLogin) {
         final res = await DmGrpc.dmView(aid, cid.value);
         if (res case Success(:final response)) {
-          if (response.hasSubtitle() &&
-              response.subtitle.subtitles.isNotEmpty) {
-            _setSubtitle(
-              response.subtitle.subtitles
-                  .map(
-                    (i) => Subtitle(
-                      lan: i.lan,
-                      lanDoc: i.lanDoc,
-                      subtitleUrl: i.subtitleUrl.replaceFirst(
-                        RegExp('^https?:'),
-                        '',
-                      ),
-                      isAi: i.type == .AI,
-                    ),
-                  )
-                  .toList()
-                ..sort(),
-            );
+          if (DmGrpc.dmViewToSubtitle(response) case final sub?
+              when (sub.isNotEmpty)) {
+            _setSubtitle(sub);
           }
         } else {
           res.toast();
@@ -1895,6 +1927,11 @@ class VideoDetailController extends GetxController
     // 小窗模式保留播放进度上下文，不重置跳过片段（上游无小窗概念，条件来自本 fork）
     if (!PipOverlayService.isInPipMode && blockConfig.enableBlock) {
       resetBlock();
+    }
+
+    // view point
+    if (plPlayerController.showViewPoints) {
+      viewPointList.clear();
     }
 
     if (!isFileSource) {

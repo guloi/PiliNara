@@ -1106,6 +1106,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       if (plPlayerController.showViewPoints) .viewPoints,
       if (isNotFileSource && plPlayerController.showDmChart) .dmChart,
       if (plPlayerController.isAnim) .superResolution,
+      if (plPlayerController.showViewPoints) .viewPoints,
       if (isNotFileSource && anySeason) .episode,
       if (flag) .fit,
       if (isNotFileSource) .aiTranslate,

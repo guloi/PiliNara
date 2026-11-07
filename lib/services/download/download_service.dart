@@ -20,13 +20,17 @@ import 'package:PiliPlus/models_new/video/video_detail/episode.dart' as ugc;
 import 'package:PiliPlus/models_new/video/video_detail/page.dart';
 import 'package:PiliPlus/models_new/video/video_play_info/subtitle.dart';
 import 'package:PiliPlus/services/download/download_manager.dart';
+import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/cache_manager.dart';
 import 'package:PiliPlus/utils/danmaku_utils.dart';
 import 'package:PiliPlus/utils/extension/file_ext.dart';
 import 'package:PiliPlus/utils/extension/string_ext.dart';
 import 'package:PiliPlus/utils/id_utils.dart';
 import 'package:PiliPlus/utils/path_utils.dart';
+import 'package:PiliPlus/utils/storage.dart';
+import 'package:PiliPlus/utils/storage_key.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
+import 'package:PiliPlus/utils/subtitle_utils.dart';
 import 'package:flutter/foundation.dart'
     show kDebugMode, debugPrint, VoidCallback, ValueChanged;
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -70,6 +74,12 @@ class DownloadService extends GetxService {
 
   late Future<void> waitForInitialization;
 
+  var cachePlayInfo = Pref.cachePlayInfo;
+  void toggleCachePlayInfo() {
+    cachePlayInfo = !cachePlayInfo;
+    GStorage.setting.put(SettingBoxKey.cachePlayInfo, cachePlayInfo);
+  }
+
   @override
   void onInit() {
     super.onInit();
@@ -103,7 +113,8 @@ class DownloadService extends GetxService {
 
     await for (final entryDir in pageDir.list()) {
       if (entryDir is Directory) {
-        final entryFile = File(path.join(entryDir.path, _entryFile));
+        final entryDirPath = entryDir.path;
+        final entryFile = File(path.join(entryDirPath, _entryFile));
         if (entryFile.existsSync()) {
           try {
             final entryJson = await entryFile.readAsString();
@@ -111,9 +122,13 @@ class DownloadService extends GetxService {
             if (_migrateAutoFolder(json)) {
               await entryFile.writeAsString(jsonEncode(json));
             }
-            final entry = BiliDownloadEntryInfo.fromJson(json)
-              ..pageDirPath = pageDir.path
-              ..entryDirPath = entryDir.path;
+            final entry =
+                BiliDownloadEntryInfo.fromJson(
+                    json,
+                    entryDirPath,
+                  )
+                  ..pageDirPath = pageDir.path
+                  ..entryDirPath = entryDirPath;
             if (entry.isCompleted) {
               result.add(entry);
             } else {
@@ -196,7 +211,7 @@ class DownloadService extends GetxService {
       downloadTitle: '视频已缓存完成',
       downloadSubtitle: videoDetail?.title ?? videoArc!.title,
     );
-    final currentTime = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final currentTime = DateTime.now().millisecondsSinceEpoch;
     final entry = BiliDownloadEntryInfo(
       mediaType: 2,
       hasDashAudio: false,
@@ -245,7 +260,7 @@ class DownloadService extends GetxService {
     if (waitDownloadQueue.indexWhere((e) => e.cid == cid) != -1) {
       return;
     }
-    final currentTime = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final currentTime = DateTime.now().millisecondsSinceEpoch;
     final source = SourceInfo(
       avId: episode.aid!,
       cid: cid,
@@ -304,11 +319,12 @@ class DownloadService extends GetxService {
 
   Future<void> _createDownload(BiliDownloadEntryInfo entry) async {
     final entryDir = await _getDownloadEntryDir(entry);
-    final entryJsonFile = File(path.join(entryDir.path, _entryFile));
+    final entryDirPath = entryDir.path;
+    final entryJsonFile = File(path.join(entryDirPath, _entryFile));
     await entryJsonFile.writeAsString(jsonEncode(entry.toJson()));
     entry
       ..pageDirPath = entryDir.parent.path
-      ..entryDirPath = entryDir.path
+      ..entryDirPath = entryDirPath
       ..status = DownloadStatus.wait;
     waitDownloadQueue.add(entry);
     if (curDownload.value?.status.isDownloading != true) {
@@ -679,15 +695,72 @@ class DownloadService extends GetxService {
     return false;
   }
 
+  Future<bool> updatePlayInfo(BiliDownloadEntryInfo entry) async {
+    try {
+      final pageData = entry.pageData;
+      if (pageData == null) return true;
+      final res = await VideoHttp.playInfo(
+        bvid: entry.bvid,
+        cid: pageData.cid,
+      );
+      if (res case Success(:final response)) {
+        bool needsUpdate = false;
+
+        final viewPoints = response.viewPoints;
+        if (viewPoints != null && viewPoints.isNotEmpty) {
+          entry.viewPoints = viewPoints;
+          needsUpdate = true;
+        }
+
+        final subtitles =
+            response.subtitle?.subtitles ??
+            (!Accounts.main.isLogin
+                ? DmGrpc.dmViewToSubtitle(
+                    (await DmGrpc.dmView(
+                      entry.avid,
+                      pageData.cid,
+                    )).dataOrNull,
+                  )
+                : null);
+
+        if (subtitles != null && subtitles.isNotEmpty) {
+          entry.subtitles = subtitles;
+          needsUpdate = true;
+          Future.wait(subtitles.map((sub) => _downloadSubtitle(entry, sub)));
+        }
+
+        if (needsUpdate) {
+          await _updateBiliDownloadEntryJson(entry);
+        }
+
+        return true;
+      }
+      return false;
+    } catch (e, s) {
+      if (kDebugMode) debugPrint('$e\n\n$s');
+      return false;
+    }
+  }
+
+  Future<void> _downloadSubtitle(
+    BiliDownloadEntryInfo entry,
+    Subtitle sub,
+  ) async {
+    try {
+      final bytes = await SubtitleUtils.getSubtitle(sub.subtitleUrl!);
+      if (bytes == null) return;
+      final file = File(sub.toPath(entry.entryDirPath));
+      if (!file.existsSync()) await file.create(recursive: true);
+      file.writeAsBytes(bytes);
+    } catch (e, s) {
+      if (kDebugMode) debugPrint('$e\n\n$s');
+    }
+  }
+
   Future<void> _startDownload(BiliDownloadEntryInfo entry) async {
     try {
       if (!await downloadDanmaku(entry: entry)) {
         return;
-      }
-
-      // ugc segments
-      if (entry.pageData != null && Pref.enableSponsorBlock) {
-        await _updateBlockSegments(entry);
       }
 
       _updateCurStatus(DownloadStatus.getPlayUrl);
@@ -723,6 +796,10 @@ class DownloadService extends GetxService {
           entry: entry,
           clipInfoList: downloadResult.clipInfoList,
         ),
+        // ugc segments
+        if (entry.pageData != null && Pref.enableSponsorBlock)
+          _updateBlockSegments(entry),
+        if (cachePlayInfo) updatePlayInfo(entry),
       ]);
 
       if (curDownload.value?.cid != entry.cid) {
