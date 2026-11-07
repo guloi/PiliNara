@@ -1360,8 +1360,21 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 全屏后自检发现的问题，写进诊断，下播后仍能看到。
   String? _hdrSelfCheckNote;
 
-  /// `setWindowHdr` 下发后系统回读的窗口色彩模式（4 = HDR，0 = 默认）。
+  /// `setWindowHdr` 下发后系统回读的窗口色彩模式。
+  ///
+  /// 具体数值由原生按 `ActivityInfo.COLOR_MODE_*` 常量翻成名字（默认 / 广播 /
+  /// 游戏 / HDR / 自动），不要在 Dart 侧硬编码猜数字：各版本文档与真实常量
+  /// 对不上时，猜错会把「游戏」当成「HDR」。
   int? _windowHdrColorMode;
+  String? _windowColorModeLabel;
+
+  /// 进出全屏后窗口色彩模式的采样时间线。
+  ///
+  /// 全屏/半屏的画面亮度差异至今只有一个稳定的系统侧变量：窗口色彩模式。
+  /// 单看某一刻的回读值分不清「本来就一直是这个值」和「切换时被系统改掉」，
+  /// 所以过渡后连续采几次，把轨迹留在诊断里。
+  final List<String> _colorModeTimeline = [];
+  final List<Timer> _colorModeSampleTimers = [];
 
   /// 显示端 HDR 能力与当前物理模式（原生回传，随自检一起刷新）。
   Map? _displayHdrInfo;
@@ -1400,12 +1413,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// 显示端 HDR 能力与当前物理模式（原生回传）。
   ///
-  /// 面板真正被激发时 hdr 为 true、colorMode 为 4；片源明明是 HDR 而这里
-  /// 仍是 SDR，说明窗口/VO 没有把 HDR 交给系统，画面会被按 SDR 处理而发暗。
+  /// hdr 只能说明「显示端支持并在 HDR 状态」，不能说明我们这一层被正确
+  /// 解释；hdrSdrRatio 是 SF 给 HDR 图层留的余量，被 tone map 时按它压。
   String _displayHdrLabel(Map info) {
     final mode =
         '${info['modeWidth'] ?? '-'}x${info['modeHeight'] ?? '-'}@${info['refreshRate'] ?? '-'}Hz';
+    final ratio = info['hdrSdrRatioAvailable'] == true
+        ? '${info['hdrSdrRatio']}'
+        : '-';
     return '显示端: hdr=${info['hdr'] ?? '-'} / '
+        '窗口模式=${info['colorModeLabel'] ?? '-'}(${info['colorMode'] ?? '-'}) / '
+        'HDR 余量=$ratio / '
         '峰值=${info['maxLuminance'] ?? '-'} / '
         '平均=${info['maxAvgLuminance'] ?? '-'} nits / '
         '模式=$mode / 支持类型=${info['hdrTypes'] ?? '-'}';
@@ -1499,8 +1517,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       if (native)
         '原生 Surface: wid=${_nativeWid ?? '-'}，'
             'SurfaceView 尺寸=${_nativeSurfaceSize == null ? '-' : '${_nativeSurfaceSize!.$1}x${_nativeSurfaceSize!.$2}'}',
-      if (_lastProbeMean != null)
+      if (_lastProbeMean != null || _lastProbeError != null)
         '直通画面采样: mean=$_lastProbeMean / max=$_lastProbeMax / '
+            'size=$_lastProbeSize / error=$_lastProbeError / '
             'bright=$_lastProbeBright（mean≈0 表示 Surface 全黑）',
       if (_lastProbeShown != null)
         '直通 SurfaceView: shown=$_lastProbeShown / vis=$_lastProbeVisibility / '
@@ -1535,7 +1554,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       // 交换链真正的尺寸/格式只能从 libplacebo 的面配置日志里看。
       'VO 输入帧尺寸: ${read('video-out-params/w')}x${read('video-out-params/h')}',
       '窗口 HDR 预切: ${_windowHdrRequested ? '是' : '否'} / '
-          '实际 colorMode=${_windowHdrColorMode ?? '-'}（4=HDR，0=默认）',
+          '实际 colorMode=${_windowHdrColorMode ?? '-'}'
+          '(${_windowColorModeLabel ?? '?'})',
+      if (_colorModeTimeline.isNotEmpty)
+        '窗口色彩模式时间线:\n${_colorModeTimeline.join('\n')}',
       if (_displayHdrInfo != null) _displayHdrLabel(_displayHdrInfo!),
       if (_hdrSelfCheckNote != null) '全屏 HDR 自检: $_hdrSelfCheckNote',
       '杜比视界: $doviLabel',
@@ -1639,10 +1661,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     if (display != null) _displayHdrInfo = display;
     final colorMode = (_displayHdrInfo?['colorMode'] as num?)?.toInt();
     if (colorMode != null) _windowHdrColorMode = colorMode;
+    final colorLabel = _displayHdrInfo?['colorModeLabel'] as String?;
+    if (colorLabel != null) _windowColorModeLabel = colorLabel;
     final displayHdr = _displayHdrInfo?['hdr'] as bool?;
-    final suspect = (colorMode != null && colorMode != 4) || displayHdr == false;
+    // HDR / 自动 都算「系统愿意按 HDR 处理」；其余（默认 / 游戏 / 广播）
+    // 只记一笔，不再据此自动重建 VO——实测半屏出画正常时也是同一个值。
+    final modeOk = colorLabel == 'HDR' || colorLabel == '自动';
+    final suspect = (colorMode != null && !modeOk) || displayHdr == false;
     _hdrSelfCheckNote = suspect
-        ? '全屏后显示端未报告 HDR（colorMode=$colorMode hdr=$displayHdr），'
+        ? '全屏后窗口色彩模式=$colorLabel($colorMode) hdr=$displayHdr，'
               '若画面同时变暗，请把这份快照反馈'
         : null;
     debugPrint(
@@ -1716,6 +1743,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   double? _lastProbeAlpha;
   String? _lastProbeParent;
   int? _lastProbeWindowColorMode;
+
+  /// 上一次 SurfaceView 采样失败的原因与采样尺寸（原生回传）。
+  String? _lastProbeError;
+  String? _lastProbeSize;
 
   /// 原生视频当前在屏幕上的矩形（逻辑像素，全局坐标）。
   ///
@@ -2034,7 +2065,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   Future<void> _probeNativeSurface() async {
     final owner = _nativeOwner;
     if (owner == null || !nativeSurfaceMode.value) return;
-    final data = await NativeVideoSurfaceChannel.probe(owner: owner);
+    // 全屏刚切完时 SurfaceView 还在 relayout，第一次 PixelCopy 常常拿不到
+    // 尺寸（原生会回 error），隔一会儿再试一次，否则全屏快照里永远没有
+    // 「Surface 本身是黑还是亮」这一项。
+    var data = await NativeVideoSurfaceChannel.probe(owner: owner);
+    if (data?['error'] != null) {
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      data = await NativeVideoSurfaceChannel.probe(owner: owner);
+    }
     final mean = (data?['mean'] as num?)?.toInt();
     final max = (data?['max'] as num?)?.toInt();
     final bright = (data?['bright'] as num?)?.toInt();
@@ -2043,11 +2081,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final alpha = (data?['alpha'] as num?)?.toDouble();
     final parent = data?['parent'] as String?;
     final windowColorMode = (data?['windowColorMode'] as num?)?.toInt();
+    final probeError = data?['error'] as String?;
+    final probeSize = data?['size'] as String?;
     debugPrint(
       '[HDR] probe mean=$mean max=$max bright=$bright '
       'shown=$shown vis=$visibility alpha=$alpha parent=$parent '
-      'windowColorMode=$windowColorMode',
+      'windowColorMode=$windowColorMode size=$probeSize error=$probeError',
     );
+    _lastProbeError = probeError;
+    _lastProbeSize = probeSize;
     _lastProbeMean = mean;
     _lastProbeMax = max;
     _lastProbeBright = bright;
@@ -2107,10 +2149,59 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         enabled: enabled,
       );
       _windowHdrColorMode = mode;
-      _noteVoLog('--- windowHdr=$enabled applied=$mode');
-      debugPrint('[HDR] window color mode=$enabled applied=$mode');
+      final info = await NativeVideoSurfaceChannel.windowColorMode();
+      _windowColorModeLabel = info?['label'] as String?;
+      _noteVoLog(
+        '--- windowHdr=$enabled applied=$mode'
+        '(${_windowColorModeLabel ?? '?'})',
+      );
+      debugPrint(
+        '[HDR] window color mode=$enabled applied=$mode '
+        'label=$_windowColorModeLabel',
+      );
     } catch (e) {
       debugPrint('[HDR] setWindowHdr failed: $e');
+    }
+  }
+
+  /// 采一次窗口色彩模式（只读，不产生副作用）。
+  Future<void> _sampleWindowColorMode(String tag) async {
+    try {
+      final info = await NativeVideoSurfaceChannel.windowColorMode();
+      if (info == null) return;
+      final mode = (info['mode'] as num?)?.toInt();
+      final label = info['label'] as String? ?? '?';
+      _windowColorModeLabel = label;
+      if (mode != null) _windowHdrColorMode = mode;
+      _colorModeTimeline.add('--- $tag=$label(${mode ?? '-'})');
+      if (_colorModeTimeline.length > 16) _colorModeTimeline.removeAt(0);
+    } catch (e) {
+      debugPrint('[HDR] windowColorMode failed: $e');
+    }
+  }
+
+  /// 进出全屏后连续采样窗口色彩模式，看它有没有被系统改掉。
+  ///
+  /// 全屏切换要经过 relayout、SurfaceView 尺寸变化、VO 重新下发，
+  /// 色彩模式若在这期间被覆盖，回读值只会在某个时间点之后才变；
+  /// 只采一次很容易正好落在还没变的那一刻。
+  void _scheduleColorModeTimeline(bool fullScreen) {
+    for (final timer in _colorModeSampleTimers) {
+      timer.cancel();
+    }
+    _colorModeSampleTimers.clear();
+    _colorModeTimeline.clear();
+    final tag = fullScreen ? '全屏' : '半屏';
+    for (final ms in const [0, 400, 900, 1600, 2600]) {
+      if (ms == 0) {
+        unawaited(_sampleWindowColorMode('$tag+${ms}ms'));
+        continue;
+      }
+      _colorModeSampleTimers.add(
+        Timer(Duration(milliseconds: ms), () {
+          unawaited(_sampleWindowColorMode('$tag+${ms}ms'));
+        }),
+      );
     }
   }
 
@@ -4074,6 +4165,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 系统顺手复位，画面随即发灰、面板不再激发。这里主动钉一次即可：
     // 尺寸变化走 android_reconfig，它本来就会重下发 HDR dataspace，不需要
     // 再 vo=null 重建（重建期间 mpv 会报 buffering）。
+    _scheduleColorModeTimeline(val);
     if (_isVulkanHdrOutput) _updateWindowHdrMode(force: true);
     // SurfaceView 重建、VO 重新下发期间 mpv 会短暂报 buffering，
     // 过渡窗口（1.2s）内不显示加载动画，避免全屏切换闪一下「加载中」。
@@ -4655,6 +4747,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _fullScreenTransitionTimer = null;
     _fullScreenHdrRepinTimer?.cancel();
     _fullScreenHdrRepinTimer = null;
+    for (final timer in _colorModeSampleTimers) {
+      timer.cancel();
+    }
+    _colorModeSampleTimers.clear();
     // 注意：不要在这里抓快照。销毁过程中 surfaceDestroyed 会把 vo 置回 null，
     // 抓到的会是「拆机态」。播放中每 5 秒的快照已经足够还原真实状态。
     _cancelAutoAudioOnlyTimer();

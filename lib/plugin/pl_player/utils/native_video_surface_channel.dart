@@ -86,6 +86,13 @@ abstract final class NativeVideoSurfaceChannel {
   static Future<int?> setWindowHdr({required bool enabled}) =>
       channel.invokeMethod<int>('setWindowHdr', {'enabled': enabled});
 
+  /// 诊断：只读窗口色彩模式，不产生副作用，可连续采样。
+  ///
+  /// 返回 `{"mode": int, "label": String}`，label 由原生按 ActivityInfo 常量
+  /// 拼出来（默认 / 广播 / 游戏 / HDR / 自动），避免 Dart 侧硬编码猜数字。
+  static Future<Map?> windowColorMode() =>
+      channel.invokeMethod<Map>('windowColorMode');
+
   /// 诊断：显示端 HDR 能力与当前物理模式。
   ///
   /// 键：colorMode（窗口色彩模式）、hdr（显示端是否处于 HDR）、

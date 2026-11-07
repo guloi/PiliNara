@@ -102,18 +102,43 @@ class MainActivity : AudioServiceActivity() {
         return builder.toString()
     }
 
+    /** Window.colorMode 的可读名字，避免在 Dart 侧硬编码常量表。 */
+    private fun colorModeLabel(mode: Int): String = when (mode) {
+        ActivityInfo.COLOR_MODE_DEFAULT -> "默认"
+        ActivityInfo.COLOR_MODE_BROADCAST -> "广播"
+        ActivityInfo.COLOR_MODE_GAME -> "游戏"
+        ActivityInfo.COLOR_MODE_HDR -> "HDR"
+        ActivityInfo.COLOR_MODE_AUTO -> "自动"
+        else -> "未知"
+    }
+
+    /**
+     * 只读当前 Window.colorMode，不产生副作用。
+     *
+     * 全屏/半屏切换后 mpv 侧参数完全一致、但画面亮度不同，唯一变过的系统状态
+     * 就是这个值，所以要能低成本地连续采样，看它什么时候被系统改掉。
+     */
+    private fun readWindowColorMode(): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return mapOf("mode" to -1, "label" to "不支持")
+        }
+        val mode = window.colorMode
+        return mapOf("mode" to mode, "label" to colorModeLabel(mode))
+    }
+
     /**
      * 诊断：显示端的 HDR 能力与当前物理模式。
      *
      * 面板是否真的进了 HDR，单看 mpv 的参数（target-peak=auto）看不出来：
      * ANativeWindow_setBuffersGeometry 会把 dataspace 复位，全屏这类尺寸变化
      * 之后 Vulkan 交换链有可能回落成 SDR。这里把系统侧的判据一并带回去：
-     * window.colorMode=4 且 display.isHdr=true 才说明面板真的被激发。
+     * 窗口色彩模式（原生翻好的名字）、display.isHdr、以及 SF 的 HDR 余量。
      */
     private fun describeHdrDisplay(): Map<String, Any?> {
         val out = HashMap<String, Any?>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             out["colorMode"] = window.colorMode
+            out["colorModeLabel"] = colorModeLabel(window.colorMode)
         }
         val manager = getSystemService(DisplayManager::class.java)
         val display = manager?.getDisplay(Display.DEFAULT_DISPLAY) ?: return out
@@ -123,6 +148,12 @@ class MainActivity : AudioServiceActivity() {
             out["maxAvgLuminance"] = caps.desiredMaxAverageLuminance
             out["minLuminance"] = caps.desiredMinLuminance
             out["hdrTypes"] = caps.supportedHdrTypes.joinToString(",")
+        }
+        // SF 给 HDR 图层留的「亮度余量」：HDR 图层被 tone map 时按它压，
+        // 显示端没真的进 HDR 时这个值会明显偏小。
+        if (Build.VERSION.SDK_INT >= 34) {
+            out["hdrSdrRatioAvailable"] = display.isHdrSdrRatioAvailable
+            out["hdrSdrRatio"] = display.hdrSdrRatio
         }
         display.mode?.let { mode ->
             out["modeWidth"] = mode.physicalWidth
@@ -190,23 +221,44 @@ class MainActivity : AudioServiceActivity() {
                     result.success(null)
                 }
                 "setWindowHdr" -> {
-                    // 回读 Window.colorMode（4 = HDR）：部分 ROM 会直接忽略这次
-                    // 请求，Dart 侧只看「已请求」会误判面板已切到 HDR。
+                    // 回读 Window.colorMode：部分 ROM 会直接忽略这次请求，Dart 侧
+                    // 只看「已请求」会误判面板已切到 HDR。回读值还是「被系统改写」
+                    // 的唯一证据（全屏后实测会变成 COLOR_MODE_GAME）。
                     var applied = -1
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val requested = if (boolArg("enabled")) {
+                            ActivityInfo.COLOR_MODE_HDR
+                        } else {
+                            ActivityInfo.COLOR_MODE_DEFAULT
+                        }
                         runCatching {
-                            window.setColorMode(
-                                if (boolArg("enabled")) {
-                                    ActivityInfo.COLOR_MODE_HDR
-                                } else {
-                                    ActivityInfo.COLOR_MODE_DEFAULT
-                                },
-                            )
+                            window.setColorMode(requested)
                         }.onFailure { Log.w("PiliNara", "setColorMode failed", it) }
                         applied = window.colorMode
+                        if (applied != requested) {
+                            // setColorMode 走 Window.mColorMode，某些 ROM 会被随后
+                            // 的窗口属性更新覆盖；再走一次 LayoutParams 这条路。
+                            runCatching {
+                                val lp = window.attributes
+                                lp.colorMode = requested
+                                window.attributes = lp
+                            }.onFailure {
+                                Log.w("PiliNara", "layoutParams colorMode failed", it)
+                            }
+                            val retried = window.colorMode
+                            Log.w(
+                                "PiliNara",
+                                "setWindowHdr requested=$requested(${colorModeLabel(requested)}) " +
+                                    "applied=$applied(${colorModeLabel(applied)}) " +
+                                    "retried=$retried(${colorModeLabel(retried)})",
+                            )
+                            applied = retried
+                        }
                     }
                     result.success(applied)
                 }
+                // 诊断：只读窗口色彩模式（可连续采样）。
+                "windowColorMode" -> result.success(readWindowColorMode())
                 // 诊断：显示端 HDR 能力与当前物理模式。
                 "hdrDisplayInfo" -> result.success(describeHdrDisplay())
                 "remove" -> {

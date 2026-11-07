@@ -432,10 +432,12 @@ BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 RO
   （`_verifyFullScreenHdr`）。
 * **新增系统侧判据**（原生 `hdrDisplayInfo`，`DisplayManager` +
   `Display.HdrCapabilities`）：
-  - `窗口 HDR 预切: 是 / 实际 colorMode=N`——`setWindowHdr` 现在会回读
-    `Window.colorMode`（4=HDR，0=默认），ROM 忽略请求时能直接看出来；
+  - `窗口 HDR 预切: 是 / 实际 colorMode=N(名字)`——`setWindowHdr` 现在会回读
+    `Window.colorMode`，名字由原生按 `ActivityInfo.COLOR_MODE_*` 常量翻出来
+    （默认 / 广播 / 游戏 / HDR / 自动），ROM 忽略请求时能直接看出来；
+
   - `显示端: hdr=…/ 峰值=…nits / 平均=…nits / 模式=WxH@Hz / 支持类型=…`；
-  - `全屏 HDR 自检: …`——全屏稳定后若 `colorMode != 4` 或 `display.isHdr=false`，
+  - `全屏 HDR 自检: …`——全屏稳定后若窗口模式不是 `HDR`/`自动` 或 `display.isHdr=false`，
     记一条提示，提示用户把快照发回来。
 
 > 注意：这些值只用于判断，不要拿来自动重建 VO。部分 ROM 的 `Window.colorMode`
@@ -489,7 +491,8 @@ applied=0`、`--- VO 重建 wid=… vo=…`。这些行会拼在「HDR 状态诊
 
 到最新一版快照为止，两个状态里能拿到的证据完全一致：
 
-* 窗口 `colorMode=2`（HDR）两态相同，显示端 `hdr=true`、峰值 2000 nits；
+* 窗口色彩模式两态相同（早期版本读到的 `2` 并不是 HDR，具体名字见 7.7），
+  显示端 `hdr=true`、峰值 2000 nits；
 * `video-out-params` 两态都是 `bt.2020 / pq / limited`，没有回落 SDR；
 * 半屏 `Picked surface configuration 61: VK_FORMAT_A2B10G10R10_UNORM_PACK32 +
   VK_COLOR_SPACE_HDR10_ST2084_EXT`，全屏那次没有再打印 `Picked surface configuration`。
@@ -515,6 +518,34 @@ applied=0`、`--- VO 重建 wid=… vo=…`。这些行会拼在「HDR 状态诊
 * 依旧偏暗 → 与尺寸无关，问题在 Vulkan 缓冲被合成的方式（同尺寸的 mediacodec
   直通是正常的），需要往 mpv/libplacebo 侧改（例如换 LINEAR 色彩空间面，或补 HDR
   静态元数据）。
+
+### 7.7 窗口色彩模式：名字由原生给，别再猜数字
+
+全屏变暗排查里最容易走错的一步，是拿 `Window.colorMode` 的数字直接下结论。
+`ActivityInfo` 的常量在各版本 SDK 里顺序不同（`COLOR_MODE_DEFAULT` /
+`BROADCAST` / `GAME` / `HDR` / `AUTO`），Dart 侧硬编码「4=HDR」最后把
+「游戏模式」当成了「HDR 已激发」。
+
+现在的做法：
+
+* `MainActivity.colorModeLabel()` 用 `when` 对 `ActivityInfo.COLOR_MODE_*` 常量
+  出名字（默认 / 广播 / 游戏 / HDR / 自动），`describeHdrDisplay()` 与
+  `windowColorMode` 通道方法都带 `label`；
+* `setWindowHdr` 回读不一致时会再用 `window.attributes.colorMode` 走一次
+  （`setColorMode` 只改 `Window.mColorMode`，部分 ROM 随后被窗口属性更新覆盖），
+  并打 `setWindowHdr requested=… applied=… retried=…` 日志；
+* `PlPlayerController._scheduleColorModeTimeline()` 在进出全屏后的
+  0 / 400 / 900 / 1600 / 2600 ms 各采一次（只读），拼成诊断里的
+  「窗口色彩模式时间线」。单点回读分不清「一直是这个值」和「切换时被改掉」。
+
+两个同源判据：
+
+* `显示端: … HDR 余量=…`（API 34+ `Display.getHdrSdrRatio()`）——SF 给 HDR
+  图层留的余量，HDR 图层被 tone map 时按它压；
+* `直通画面采样: mean=… size=… error=…`——PixelCopy 读 SurfaceView 的真实像素。
+  `mean` 在两种状态下相近但屏幕亮度不同 → 暗在合成/显示端，不在 mpv；
+  `mean` 本身就很小 → 是 libplacebo 出的画面就暗。全屏时早先一直只有 `null`，
+  现在失败也会回 `error`（owner 不符 / 尺寸为 0 / PixelCopy 返回码）并重试一次。
 
 ## 八、代码位置
 

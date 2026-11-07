@@ -214,12 +214,22 @@ class VideoSurfaceHost(
      */
     fun probe(owner: Int, result: MethodChannel.Result) {
         val sv = surfaceView
-        if (owner != ownerId || sv == null || sv.width <= 1 || sv.height <= 1) {
-            result.success(null)
+        // 失败时也回一个带 error 的 map：全屏后 probe 一直拿不到数（Dart 侧
+        // 只看到 null），没有原因就一直卡在「不知道是不是 Surface 本身黑」。
+        if (sv == null) {
+            result.success(mapOf("error" to "no surfaceView"))
+            return
+        }
+        if (owner != ownerId) {
+            result.success(mapOf("error" to "owner $owner != $ownerId"))
+            return
+        }
+        if (sv.width <= 1 || sv.height <= 1) {
+            result.success(mapOf("error" to "size ${sv.width}x${sv.height}"))
             return
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            result.success(null)
+            result.success(mapOf("error" to "PixelCopy needs API 24"))
             return
         }
         val shown = sv.isShown
@@ -235,14 +245,18 @@ class VideoSurfaceHost(
             Bitmap.createBitmap(sv.width, sv.height, Bitmap.Config.ARGB_8888)
         } catch (t: Throwable) {
             Log.w(TAG, "probe: unable to allocate bitmap", t)
-            result.success(null)
+            result.success(mapOf("error" to "alloc ${sv.width}x${sv.height}: ${t.message}"))
             return
         }
         val listener = PixelCopy.OnPixelCopyFinishedListener { copyResult ->
             if (copyResult != PixelCopy.SUCCESS) {
                 Log.w(TAG, "probe: PixelCopy failed with $copyResult")
                 bitmap.recycle()
-                mainHandler.post { result.success(null) }
+                mainHandler.post {
+                    result.success(
+                        mapOf("error" to "pixelCopy=$copyResult", "size" to "${sv.width}x${sv.height}"),
+                    )
+                }
             } else {
                 Thread {
                     val data = runCatching {
@@ -275,6 +289,7 @@ class VideoSurfaceHost(
                             "mean" to mean,
                             "max" to maxValue,
                             "bright" to bright,
+                            "size" to "${bitmap.width}x${bitmap.height}",
                             "shown" to shown,
                             "vis" to visibility,
                             "alpha" to alpha,
@@ -296,7 +311,7 @@ class VideoSurfaceHost(
         } catch (t: Throwable) {
             Log.w(TAG, "probe: PixelCopy unavailable", t)
             bitmap.recycle()
-            result.success(null)
+            result.success(mapOf("error" to "unavailable: ${t.message}"))
         }
     }
 
