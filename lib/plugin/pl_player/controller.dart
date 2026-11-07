@@ -209,6 +209,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   late DataSource dataSource;
 
+  /// 最近一次 [setDataSource] 的参数快照。
+  ///
+  /// 出画后端确定失败（Vulkan 不可用要换 MediaCodec 直通、纹理上 gpu-next
+  /// 不可用要退回 gpu）时，当前播放器只能销毁重建：换 vo 的同时还必须换
+  /// 解码方式（mediacodec_embed 只认同它一起创建的硬解直通），重建后用这份
+  /// 快照从原位置重新打开同一个片源。
+  Future<void> Function(Duration? seekTo, bool autoplay)? _reloadSource;
+
+  /// 正在重建播放器，避免回退逻辑重入。
+  bool _rebuildingOutput = false;
+
   Timer? _timer;
   StreamSubscription? _subForSeek;
 
@@ -1572,18 +1583,21 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     if (_vulkanVoUnavailable) return;
     if (!nativeSurfaceMode.value || _useMedia3Dovi) return;
     if (!_vulkanNextWanted) return;
-    final direct = _useHdrDirectFallback;
     _lastFallbackReason = reason;
-    debugPrint(
-      '[HDR] Vulkan VO unavailable ($reason), fallback to '
-      '${direct ? 'mediacodec_embed (HDR)' : 'gpu-next OpenGL (SDR)'}',
-    );
     _vulkanVoUnavailable = true;
     _vulkanFallbackAt = DateTime.now();
+    // 回退目标必须在标记置位之后再算：杜比视界 profile 5 会按「回退方式」
+    // 决定交给 MediaCodec 直通还是留在 gpu-next OpenGL。
+    final target = _renderBackend;
+    debugPrint(
+      '[HDR] Vulkan VO unavailable ($reason), fallback to ${target.name}',
+    );
     SmartDialog.showToast(
-      direct
-          ? 'Vulkan 输出不可用，已自动回退到 MediaCodec 直通（HDR）'
-          : 'Vulkan 输出不可用，已自动回退到 gpu-next OpenGL',
+      switch (target) {
+        HdrBackend.mediacodecEmbed => 'Vulkan 输出不可用，已回退到 MediaCodec 直通',
+        HdrBackend.gpu => 'Vulkan 输出不可用，已回退到 gpu',
+        _ => 'Vulkan 输出不可用，已回退到 ${target.label}',
+      },
     );
     _vulkanCheckTimer?.cancel();
     _vulkanCheckTimer = null;
@@ -1601,6 +1615,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     } catch (_) {}
     _resetWindowHdr();
     _updateWindowHdrMode();
+    // 回退到 MediaCodec 直通时只改 vo 是不够的：mediacodec_embed 要求解码器
+    // 把画面直接输出到 Surface，而当前播放器是按硬件拷贝 / 软解创建的，
+    // 切过去拿不到帧，界面就是一直黑屏。这种情况要销毁重建播放器。
+    if (target == HdrBackend.mediacodecEmbed) {
+      unawaited(_rebuildOutput());
+      return;
+    }
     _applyNativeSurface();
     _scheduleNativeProbe();
   }
@@ -1662,7 +1683,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     debugPrint('[HDR] gpu-next texture unavailable ($reason), fallback to gpu');
     _gpuNextTextureUnavailable = true;
     _lastFallbackReason = reason;
-    SmartDialog.showToast('gpu-next 输出不可用，已回退到 gpu（重新加载视频后生效）');
+    SmartDialog.showToast('gpu-next 输出不可用，已回退到 gpu');
+    unawaited(_rebuildOutput());
   }
 
   /// 纹理出画 + Vulkan 时检查 VO 是否真的建起来了。
@@ -1728,7 +1750,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     );
     _gpuNextVulkanTextureUnavailable = true;
     _lastFallbackReason = reason;
-    SmartDialog.showToast('Vulkan 纹理输出不可用，已回退到 gpu-next OpenGL（重新加载视频后生效）');
+    SmartDialog.showToast('Vulkan 纹理输出不可用，已回退到 gpu-next OpenGL');
+    unawaited(_rebuildOutput());
   }
 
   /// 播放开始后采样 SurfaceView 画面。
@@ -2273,6 +2296,29 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       this.width = width;
       this.height = height;
       this.dataSource = dataSource;
+      _reloadSource = (seek, play) => setDataSource(
+        dataSource,
+        isLive: isLive,
+        autoplay: play,
+        seekTo: seek,
+        speed: speed,
+        width: width,
+        height: height,
+        duration: duration,
+        isVertical: isVertical,
+        aid: aid,
+        bvid: bvid,
+        cid: cid,
+        roomId: roomId,
+        epid: epid,
+        seasonId: seasonId,
+        pgcType: pgcType,
+        videoType: videoType,
+        onInit: onInit,
+        volume: volume,
+        autoFullScreenFlag: autoFullScreenFlag,
+        rotate: rotate,
+      );
       _autoPlay = autoplay;
       // 初始化数据加载状态
       dataStatus.value = DataStatus.loading;
@@ -2583,6 +2629,39 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _startListeners(player);
 
     return player;
+  }
+
+  /// 按当前后端重建播放器并回原位置续播。
+  ///
+  /// 出画后端在创建 VideoController 时就固定了（vo、hwdec 与原生 Surface 的
+  /// 绑定），运行中只改 vo 会拿不到帧；这里销毁旧播放器，再用 setDataSource
+  /// 记下的快照重新打开同一个片源。
+  Future<void> _rebuildOutput() async {
+    if (_rebuildingOutput) return;
+    final reload = _reloadSource;
+    final player = _videoPlayerController;
+    if (reload == null || player == null) return;
+    _rebuildingOutput = true;
+    final seekTo = player.state.position;
+    final wasPlaying = player.state.playing;
+    debugPrint('[HDR] rebuild player for new output backend');
+    try {
+      _removeListeners();
+      _hdrSnapshotTimer?.cancel();
+      // 保留已经挂上的原生 SurfaceView：重建后仍要在同一块 Surface 上出画。
+      _resetNativeSurfaceState(keepSurface: true);
+      _setVideoController(null);
+      _videoPlayerController = null;
+      nativeSurfaceMode.value = _wantNativeSurface || _useMedia3Dovi;
+      try {
+        await player.dispose();
+      } catch (_) {}
+      await reload(seekTo, wasPlaying);
+    } catch (e) {
+      debugPrint('[HDR] rebuild player failed: ${e}');
+    } finally {
+      _rebuildingOutput = false;
+    }
   }
 
   /// 片源切换时按需重建播放器，使出画方式与新的片源类型一致。

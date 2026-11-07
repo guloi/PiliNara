@@ -27,11 +27,7 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
     final items = <SettingsModel>[
       SwitchModel(
         title: '默认 gpu-next',
-        subtitle:
-            '所有片源默认使用 gpu-next（libplacebo）渲染：SDR 走纹理出画，'
-            'HDR / 杜比视界走原生 SurfaceView。开启后 HDR 设置里的「HDR 渲染后端」'
-            '对 HDR / 杜比视界片源失效，改由下面的子选项决定。'
-            '正在播放的视频需重新加载后才会切换出画方式。',
+        subtitle: 'SDR 走纹理，HDR / 杜比视界走原生 SurfaceView。重新加载视频后生效。',
         leading: const Icon(Icons.auto_awesome_outlined),
         setKey: SettingBoxKey.defaultGpuNext,
         defaultVal: false,
@@ -51,14 +47,8 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
         SwitchModel(
           title: 'HDR / 杜比视界时切回 MediaCodec',
           subtitle: api == GpuNextApi.opengl
-              ? '渲染 API 为 OpenGL 时建议保持开启：EGL 没有 HDR 交换链，'
-                    'HDR / 杜比视界只有交给 MediaCodec 直通才能真正激发；'
-                    '关闭后这类片源会被 libplacebo 映射成 SDR。'
-                    '杜比视界 profile 5 例外：它优先走 gpu-next，Vulkan 不可用时按下面的「回退方式」处理。'
-              : 'HDR / 杜比视界片源改用 MediaCodec 直通出画'
-                    '（mediacodec_embed），只让 SDR 片源走 gpu-next。'
-                    '关闭时 HDR / 杜比视界也交给 gpu-next 处理。'
-                    '杜比视界 profile 5 例外：它优先走 gpu-next，Vulkan 不可用时按下面的「回退方式」处理。',
+              ? '建议保持开启，否则 HDR / 杜比视界会被映射成 SDR。'
+              : '开启后 HDR / 杜比视界走 MediaCodec 直通，SDR 走 gpu-next。',
           leading: const Icon(Icons.hdr_on),
           setKey: SettingBoxKey.gpuNextHdrMediaCodec,
           defaultVal: true,
@@ -75,20 +65,14 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
             final fallback = GpuNextDoviFallback.fromValue(
               Pref.gpuNextDoviFallback,
             );
-            return '当前：${fallback.label}。${fallback.desc}'
-                '（Vulkan 不可用或渲染 API 为 OpenGL 时使用）';
+            return '当前：${fallback.label}。Vulkan 不可用或渲染 API 为 OpenGL 时使用';
           },
           onTap: _showGpuNextDoviFallbackDialog,
         ),
       if (Pref.defaultGpuNext)
         SwitchModel(
           title: '杜比视界 profile 5 软解',
-          subtitle:
-              'profile 5 的色彩要靠杜比视界 RPU 元数据还原，硬解拷贝拿不到这些元数据'
-              '会导致整体偏色；这类片源优先走 gpu-next（不受上一项影响），'
-              'Vulkan 不可用时按上一项回退。'
-              '开启后改用软解渲染（更吃性能），关闭则用硬件拷贝解码。'
-              '本项只决定走 gpu-next 时的解码方式，Vulkan 不可用时的回退见上一项。',
+          subtitle: '关闭后改用硬件拷贝解码，可能偏色。仅影响走 gpu-next 时。',
           leading: const Icon(Icons.color_lens_outlined),
           setKey: SettingBoxKey.gpuNextDoviSoft,
           defaultVal: true,

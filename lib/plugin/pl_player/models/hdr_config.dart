@@ -134,18 +134,9 @@ enum HdrBackend {
 /// * [opengl]：全部走 OpenGL，兼容性最好，但 Android 的 EGL 路径没有 HDR
 ///   交换链，HDR 片源只能由 libplacebo 映射成 SDR。
 enum GpuNextApi {
-  auto(
-    'auto',
-    '自动（推荐）',
-    'SDR 走 gpu-next OpenGL；关闭「切回 MediaCodec」后 HDR / 杜比视界走 Vulkan',
-  ),
-  vulkan('vulkan', 'Vulkan', '全部走 Vulkan 交换链，HDR 激发最完整，兼容性依赖驱动'),
-  opengl(
-    'opengl',
-    'OpenGL',
-    '全部走 gpu-next OpenGL，兼容性最好；EGL 无法激发 HDR，'
-        'HDR / 杜比视界要靠「切回 MediaCodec」',
-  );
+  auto('auto', '自动（推荐）', 'SDR 走 OpenGL，HDR / 杜比视界走 Vulkan'),
+  vulkan('vulkan', 'Vulkan', '全部走 Vulkan，HDR 激发最完整，依赖驱动'),
+  opengl('opengl', 'OpenGL', '全部走 OpenGL，兼容性最好，无法激发 HDR');
 
   const GpuNextApi(this.value, this.label, this.desc);
 
@@ -169,17 +160,11 @@ enum GpuNextApi {
 /// 此时要么继续用 gpu-next 的 OpenGL 上下文软解（色彩正确、面板不激发），
 /// 要么把出画交回 MediaCodec（杜比视界设备能激发，非杜比设备会偏色）。
 enum GpuNextDoviFallback {
-  soft(
-    'soft',
-    '软解（gpu-next OpenGL）',
-    '继续由 libplacebo 软解还原 IPTPQc2：色彩正确，但吃 CPU、耗电；'
-        'EGL 没有 HDR 交换链，面板不会进入杜比视界 / HDR 模式',
-  ),
+  soft('soft', '软解（gpu-next OpenGL）', 'libplacebo 软解，色彩正确，但吃 CPU 且无法激发 HDR'),
   mediacodec(
     'mediacodec',
     '切回 MediaCodec',
-    '交给系统解码器直通出画（mediacodec_embed）：杜比视界设备能正常激发，'
-        '不支持杜比视界的设备会因为拿不到 RPU 而偏色',
+    '系统解码器直通出画：可激发杜比视界，不支持的设备会偏色',
   );
 
   const GpuNextDoviFallback(this.value, this.label, this.desc);

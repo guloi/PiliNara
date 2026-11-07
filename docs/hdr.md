@@ -238,6 +238,13 @@ fork 的 `androidvk` 上下文据此把 `ANativeWindow` 切成 BT.2020/PQ datasp
 「mpv 错误」两行（最后一条 error 级 mpv 日志），便于回报真实失败文本。
 设置页重新选择后端会清除该标记，允许再次尝试 Vulkan。
 
+回退到 `mediacodec_embed`（或纹理 `gpu`）时只改 `vo` 是不够的：
+`mediacodec_embed` 要求解码器把画面直接输出到 Surface（`hwdec=mediacodec`），
+而播放器是按硬件拷贝 / 软解创建的，切过去拿不到帧就是一直黑屏——这正是之前
+「选了切回 MediaCodec 却回退不了」的原因。因此这类回退会销毁播放器，按
+`setDataSource` 记下的参数快照（含播放位置、播放状态）重建
+（`_rebuildOutput()`），出画后端与解码方式一起换掉。
+
 ### 4.3 gpu-next OpenGL / gpu（兼容）
 
 `gpu-next-gl` 使用 `gpu-api=opengl` / `gpu-context=android` 并写 `fbo-format=rgba16hf`
