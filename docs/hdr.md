@@ -404,7 +404,9 @@ BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 RO
 
 * `_setFullScreen` 在 HDR 直通时（`_isVulkanHdrOutput`，即
   `nativeSurfaceMode && !_useMedia3Dovi && _renderBackend == gpuNext`）用
-  `_updateWindowHdrMode(force: true)` 重新钉一次窗口色彩模式；
+  `_updateWindowHdrMode(force: true)` 重新钉一次窗口色彩模式，并在 600ms 后
+  （SurfaceView 重建、尺寸下发完成时）再钉一次——进出全屏的 SystemUI／方向
+  切换可能把第一次的钉法冲掉；
 * `resizeNativeSurface` 的 200ms 防抖回调里**只写** `android-surface-size`，
   不重建 VO。
 
@@ -445,10 +447,27 @@ BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 RO
 mpv 在 VO 重建期间会短暂报 buffering，于是加载动画闪一下。处理：
 
 * 尺寸变化不再触发 VO 重建（见 7.2），把最常见的抖动源去掉；
-* `PlPlayerController.fullScreenTransition`：`_setFullScreen` 打开 900ms 过渡
+* `PlPlayerController.fullScreenTransition`：`_setFullScreen` 打开 1.2s 过渡
   窗口，`lib/plugin/pl_player/view/view.dart` 的加载动画条件里加上
-  `!fullScreenTransition.value`，这 900ms 内既不显示 `dataStatus.loading`
-  也不显示 `isBuffering` 的转圈。
+  `!fullScreenTransition.value`，这段时间既不显示 `dataStatus.loading`
+  也不显示 `isBuffering` 的转圈（600ms 的第二次 HDR 下发也落在窗口内）。
+
+### 7.5 交换链到底选了哪个面：直接看 mpv 日志
+
+「全屏变暗」的几种可能（交换链掉回 8bit / SDR、窗口 dataspace 被复位、
+libplacebo 色调映射目标偏低）在应用侧看不出来，只能靠 libplacebo 建交换链时
+打印的面配置：
+
+* info 级 `Available surface configurations:` 列出窗口当前支持的全部
+  `格式 + 色彩空间`（有没有 10bit、有没有 `HDR10_ST2084`）；
+* info 级 `Picked surface configuration N: <format> + <colorspace>` 是最终选中的那个。
+
+`PlPlayerController._mpvVoLog` 把 `vo*` / `vulkan*` 前缀、含
+swapchain / color / hdr / dataspace / reconfig / resize / format 的日志（**不限
+level**，因为面配置是 info 级）留最近 20 条，并把应用侧动作也插进去做时间线：
+`--- 全屏=true`、`--- android-surface-size 2400x1080`、`--- windowHdr=true
+applied=0`、`--- VO 重建 wid=… vo=…`。这些行会拼在「HDR 状态诊断」末尾
+（`mpv VO 日志（最近 N 条）`）。
 
 ## 八、代码位置
 

@@ -270,13 +270,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   Completer<bool>? _autoAudioRestoreCompleter;
   final RxBool suppressBufferingIndicator = false.obs;
 
-  /// 进/出全屏的过渡窗口（约 900ms）。
+  /// 进/出全屏的过渡窗口（约 1.2s）。
   ///
   /// 进出全屏会改方向与 SystemUI，SurfaceView 随之重建（新 wid → 重新下发
   /// vo），mpv 在 VO 重建期间会短暂报 buffering；这期间把加载动画压住，
-  /// 避免全屏切换时闪一下「加载中」。
+  /// 避免全屏切换时闪一下「加载中」。窗口 HDR 的第二次下发（600ms）也落在
+  /// 窗口内，万一系统又闪一次 buffering 也不会露出来。
   final RxBool fullScreenTransition = false.obs;
   Timer? _fullScreenTransitionTimer;
+
+  /// 过渡窗口过半后重新钉窗口 HDR 的定时器（见 [_setFullScreen]）。
+  Timer? _fullScreenHdrRepinTimer;
 
   /// 自动恢复需要重初始化的回调（视频→playerInit，直播→queryLiveUrl）
   PlayerInitCallback? onNeedsPlayerInit;
@@ -688,6 +692,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 前缀的日志；VO 初始化失败的原因（vo/gpu-next、vo/androidvk）只会
   /// 出现在 stream.log 里，这里留一份尾巴给 HDR 状态诊断用。
   final List<String> _mpvErrorLog = [];
+
+  /// 最近若干条与交换链 / HDR 相关的 mpv 日志（不限 level）。
+  ///
+  /// 全屏后变暗到底是「Vulkan 交换链掉回 8bit / SDR」「窗口 dataspace 被复位」
+  /// 还是「libplacebo 色调映射目标偏低」，只能看 libplacebo 建交换链时打印的
+  /// 面配置（info 级：Available surface configurations / Picked surface
+  /// configuration）与 android_reconfig 的时间点。
+  /// 这里留一份尾巴拼进 HDR 状态诊断，用户复现后一次性回传即可。
+  final List<String> _mpvVoLog = [];
+
+  /// [_mpvVoLog] 的条数上限：诊断文本要塞进设置页弹窗，留太多会刷屏。
+  static const int _mpvVoLogLimit = 20;
 
   /// 「默认 gpu-next」总开关：SDR 片源也走 gpu-next（libplacebo）渲染。
   ///
@@ -1518,6 +1534,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
       if (_lastFallbackReason != null) '自动回退原因: $_lastFallbackReason',
       if (_mpvErrorLog.isNotEmpty) 'mpv 错误: ${_mpvErrorLog.last}',
+      if (_mpvVoLog.isNotEmpty)
+        'mpv VO 日志（最近 ${_mpvVoLog.length} 条，--- 开头是应用侧动作）:\n'
+            '${_mpvVoLog.join('\n')}',
       '片源判定: ${isHdrSource ? (isDolbyVisionSource ? 'HDR / 杜比视界' : (isHdrVividSource ? 'HDR Vivid' : 'HDR')) : 'SDR'}',
       if (sourceCodecs != null) '片源 codecs: $sourceCodecs',
     ].join('\n');
@@ -2050,6 +2069,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         enabled: enabled,
       );
       _windowHdrColorMode = mode;
+      _noteVoLog('--- windowHdr=$enabled applied=$mode');
       debugPrint('[HDR] window color mode=$enabled applied=$mode');
     } catch (e) {
       debugPrint('[HDR] setWindowHdr failed: $e');
@@ -2186,6 +2206,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       // 只改尺寸，不重建 VO：mpv 会走 android_reconfig，那里已经重新
       // setBuffersGeometry 并重下发 HDR dataspace。vo=null 重建会让 mpv
       // 在重建期间报 buffering，进出全屏就闪一下加载动画。
+      _noteVoLog('--- android-surface-size ${size.$1}x${size.$2}');
       try {
         player.setProperty('android-surface-size', '${size.$1}x${size.$2}');
         _appliedSurfaceSize = size;
@@ -2245,6 +2266,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         _appliedSurfaceSize = size;
       }
       if (needVo) {
+        _noteVoLog('--- VO 重建 wid=$wid vo=$vo ${size.$1}x${size.$2}');
         // 顺序很重要：先复位 vo，再写 gpu-api/gpu-context 等初始化参数，
         // 然后给 wid，最后才设置 vo。gpu-context 只能在 VO 创建前生效；
         // media_kit 创建 VideoController 时会把 gpu-context 覆盖成 android，
@@ -2709,6 +2731,30 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
   }
 
+  /// 只保留和交换链 / 色彩空间 / HDR 有关的 VO 日志，其余照旧过滤掉。
+  bool _isVoDiagLog(PlayerLog log) {
+    if (!log.prefix.startsWith('vo') && !log.prefix.startsWith('vulkan')) {
+      return false;
+    }
+    final text = log.text.toLowerCase();
+    return text.contains('swapchain') ||
+        text.contains('surface configuration') ||
+        text.contains('color') ||
+        text.contains('hdr') ||
+        text.contains('dataspace') ||
+        text.contains('reconfig') ||
+        text.contains('resize') ||
+        text.contains('format');
+  }
+
+  /// 往 [_mpvVoLog] 追加一行（带时间戳，便于对齐全屏/尺寸变化的时刻）。
+  void _noteVoLog(String line) {
+    final stamp = DateTime.now().toIso8601String().substring(11, 23);
+    _mpvVoLog.add('$stamp $line');
+    if (_mpvVoLog.length > _mpvVoLogLimit) _mpvVoLog.removeAt(0);
+    debugPrint('[HDR][vo-log] $line');
+  }
+
   Future<Player> _initPlayer() async {
     assert(_videoPlayerController == null);
     if (PlatformUtils.isMobile && Pref.enableAppVolume) {
@@ -2769,6 +2815,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // vo/* 前缀的日志）：原生 Vulkan 建不起交换链时画面一直全黑，纹理
     // Vulkan 则是一张黑图。这里按日志提前回退，并留一份尾巴供诊断显示。
     player.stream.log.listen((log) {
+      // 交换链 / 色彩空间相关的日志不分 level 都留一份：libplacebo 建交换链时
+      // 打的是 info 级（Available surface configurations / Picked surface
+      // configuration），恰好是全屏后「有没有 10bit + HDR 面」的唯一证据。
+      if (_isVoDiagLog(log)) _noteVoLog('${log.prefix}: ${log.text}');
       if (log.level != 'error' && log.level != 'fatal') return;
       final line = '${log.prefix}: ${log.text}';
       _mpvErrorLog.add(line);
@@ -3945,6 +3995,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   void _setFullScreen(bool val) {
     isFullScreen.value = val;
+    _noteVoLog('--- 全屏=$val');
     updateSubtitleStyle();
     // 全屏切换会改窗口的 SystemUI／方向，部分 ROM 上窗口 HDR 色彩模式会被
     // 系统顺手复位，画面随即发灰、面板不再激发。这里主动钉一次即可：
@@ -3952,10 +4003,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     // 再 vo=null 重建（重建期间 mpv 会报 buffering）。
     if (_isVulkanHdrOutput) _updateWindowHdrMode(force: true);
     // SurfaceView 重建、VO 重新下发期间 mpv 会短暂报 buffering，
-    // 900ms 内不显示加载动画，避免全屏切换闪一下「加载中」。
+    // 过渡窗口（1.2s）内不显示加载动画，避免全屏切换闪一下「加载中」。
     fullScreenTransition.value = true;
     _fullScreenTransitionTimer?.cancel();
-    _fullScreenTransitionTimer = Timer(const Duration(milliseconds: 900), () {
+    // SurfaceView 重建 / 窗口 relayout 之后系统可能把窗口色彩模式复位，
+    // 过渡窗口过半（600ms，尺寸已按新窗口下发完）再钉一次。
+    _fullScreenHdrRepinTimer?.cancel();
+    _fullScreenHdrRepinTimer = Timer(const Duration(milliseconds: 600), () {
+      _fullScreenHdrRepinTimer = null;
+      if (isFullScreen.value != val) return;
+      if (_isVulkanHdrOutput) _updateWindowHdrMode(force: true);
+    });
+    _fullScreenTransitionTimer = Timer(const Duration(milliseconds: 1200), () {
       _fullScreenTransitionTimer = null;
       fullScreenTransition.value = false;
     });
@@ -4521,6 +4580,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _fullScreenSnapshotTimer?.cancel();
     _fullScreenTransitionTimer?.cancel();
     _fullScreenTransitionTimer = null;
+    _fullScreenHdrRepinTimer?.cancel();
+    _fullScreenHdrRepinTimer = null;
     // 注意：不要在这里抓快照。销毁过程中 surfaceDestroyed 会把 vo 置回 null，
     // 抓到的会是「拆机态」。播放中每 5 秒的快照已经足够还原真实状态。
     _cancelAutoAudioOnlyTimer();
