@@ -392,6 +392,27 @@ App 要等 fork 重新跑一次 Build workflow、生成新的 `libmpv-latest` �
   控制栏和亮度指示仍然清晰；IgnorePointer 不拦截手势；
 * SDR / 纹理路径仍走原来的系统或应用窗口亮度，不受影响。
 
+### 7.2 进全屏后画面发灰、面板不再激发 HDR（半屏正常）
+
+gpu-next + Vulkan 直通时，`android-surface-size` 一变，mpv 就会走
+`android_reconfig`，那里重新 `ANativeWindow_setBuffersGeometry` 会把窗口的
+BT.2020/PQ dataspace 复位。补丁本应在 HDR 分支补回来，但部分 ROM
+（如 Oneplus Ace 5 / DerpFest A17）上重建出来的 Vulkan 交换链仍回落成 SDR：
+画面变暗发灰、面板退出 HDR，而半屏时不做 resize 所以一切正常。
+
+现在的处理（`PlPlayerController`）：
+
+* `_setFullScreen` 在 HDR 直通时用 `_updateWindowHdrMode(force: true)`
+  重新钉一次窗口色彩模式；
+* `resizeNativeSurface` 的 200ms 防抖回调里，若 `_shouldRebuildVoOnResize`
+  （`nativeSurfaceMode && !_useMedia3Dovi && _renderBackend == gpuNext`）成立，
+  先 `vo=null`、补写 HDR 属性、再写新尺寸和 `wid`、最后重建 `vo`，
+  让 `android_init` 在新尺寸上重新把窗口切成 10bit BT.2020/PQ 后创建交换链，
+  绕开 `android_reconfig` 这条会掉 HDR 的路径。
+
+代价是全屏切换时 VO 重建，会有一帧黑；mediacodec_embed 直通与 SDR 纹理路径
+不受影响（仍只写 `android-surface-size`）。
+
 ## 八、代码位置
 
 | 文件 | 作用 |
