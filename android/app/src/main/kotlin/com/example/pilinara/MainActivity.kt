@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Display
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
@@ -159,6 +160,19 @@ class MainActivity : AudioServiceActivity() {
             out["modeWidth"] = mode.physicalWidth
             out["modeHeight"] = mode.physicalHeight
             out["refreshRate"] = mode.refreshRate
+        }
+        // 屏幕旋转与当前窗口尺寸：全屏除了「图层变大」，往往还伴随一次
+        // 90° 旋转（半屏竖屏 → 全屏横屏）。两者都会让 SF/HWC 重新决定这一层
+        // 由谁合成，所以必须和尺寸一起记录，不能只记尺寸。
+        out["rotation"] = when (display.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = windowManager.currentWindowMetrics.bounds
+            out["windowSize"] = "${bounds.width()}x${bounds.height()}"
         }
         return out
     }

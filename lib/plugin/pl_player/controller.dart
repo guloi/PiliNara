@@ -1411,6 +1411,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     return '${size.width.toStringAsFixed(0)}x${size.height.toStringAsFixed(0)}';
   }
 
+  /// 最近一次真正写进 android-surface-size 的尺寸（诊断用，避免字符串里层层嵌套）。
+  String get _surfaceSizeText {
+    final size = _appliedSurfaceSize;
+    return size == null ? '-' : '${size.$1}x${size.$2}';
+  }
+
   /// 显示端 HDR 能力与当前物理模式（原生回传）。
   ///
   /// hdr 只能说明「显示端支持并在 HDR 状态」，不能说明我们这一层被正确
@@ -1421,9 +1427,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final ratio = info['hdrSdrRatioAvailable'] == true
         ? '${info['hdrSdrRatio']}'
         : '-';
+    // 旋转与窗口尺寸要一起看：全屏 = 窗口变大 + 通常还有一次 90° 旋转，
+    // 这两件事都会让 SF/HWC 重新决定这一层由谁合成。
+    final geo =
+        '旋转=${info['rotation'] ?? '-'}° 窗口=${info['windowSize'] ?? '-'}';
     return '显示端: hdr=${info['hdr'] ?? '-'} / '
         '窗口模式=${info['colorModeLabel'] ?? '-'}(${info['colorMode'] ?? '-'}) / '
         'HDR 余量=$ratio / '
+        '$geo / '
         '峰值=${info['maxLuminance'] ?? '-'} / '
         '平均=${info['maxAvgLuminance'] ?? '-'} nits / '
         '模式=$mode / 支持类型=${info['hdrTypes'] ?? '-'}';
@@ -1558,6 +1569,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           '(${_windowColorModeLabel ?? '?'})',
       if (_colorModeTimeline.isNotEmpty)
         '窗口色彩模式时间线:\n${_colorModeTimeline.join('\n')}',
+      // 半分辨率实验开关本身也要记下来：开着却没生效时，尺寸日志能看出端倪。
+      '全屏半分辨率出画: ${Pref.hdrFullScreenHalfRes ? '开' : '关'}'
+          ' / 当前写入尺寸=$_surfaceSizeText',
       if (_displayHdrInfo != null) _displayHdrLabel(_displayHdrInfo!),
       if (_hdrSelfCheckNote != null) '全屏 HDR 自检: $_hdrSelfCheckNote',
       '杜比视界: $doviLabel',
