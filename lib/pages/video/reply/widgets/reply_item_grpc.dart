@@ -1198,17 +1198,11 @@ class ReplyItemGrpc extends StatelessWidget {
                           try {
                             final ctr = Get.find<AudioController>(tag: heroTag);
                             if (kDebugMode) debugPrint('Seeking AudioController');
-                            ctr.seekTo(
-                              duration,
-                              isSeek: false,
-                            );
+                            ctr.seekTo(duration);
                           } catch (_) {
                             final ctr = Get.find<VideoDetailController>(tag: heroTag);
                             if (kDebugMode) debugPrint('Seeking VideoDetailController');
-                            ctr.plPlayerController.seekTo(
-                              duration,
-                              isSeek: false,
-                            );
+                            ctr.plPlayerController.seekTo(duration);
                           }
                         } catch (e) {
                           SmartDialog.showToast('跳转失败: $e');

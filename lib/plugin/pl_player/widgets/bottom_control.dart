@@ -48,7 +48,7 @@ class BottomControl extends StatelessWidget {
     controller
       ..position.value = milliseconds ~/ 1000
       ..onSeekEnd()
-      ..seekTo(Duration(milliseconds: milliseconds), isSeek: false);
+      ..seekTo(Duration(milliseconds: milliseconds));
   }
 
   void _onHoverStart(ThumbDragDetails details) {
@@ -135,10 +135,9 @@ class BottomControl extends StatelessWidget {
                         bottom: isDesktop ? desktopProgressHoverPadding : 5.25,
                         child: ViewPointDividerBar(
                           segments: videoDetailController.viewPointList,
-                          progress: controller.duration.value > 0
-                              ? controller.position.value /
-                                    controller.duration.value
-                              : 0.0,
+                          onSeek: PlatformUtils.isDesktop
+                              ? controller.seekTo
+                              : null,
                         ),
                       ),
                       if (!isPipMode &&
@@ -153,7 +152,7 @@ class BottomControl extends StatelessWidget {
                           child: ViewPointSegmentProgressBar(
                             segments: videoDetailController.viewPointList,
                             onSeek: (position) =>
-                                controller.seekTo(position, isSeek: false),
+                                controller.seekTo(position),
                           ),
                         )
                       else

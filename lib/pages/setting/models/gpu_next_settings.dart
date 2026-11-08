@@ -120,7 +120,7 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
         values: GpuNextDoviFallback.values
             .map((e) => (e.value, e.label))
             .toList(),
-        subtitleBuilder: (context, index) => Text(
+        subtitleBuilder: (context, index, _) => Text(
           GpuNextDoviFallback.values[index].desc,
           style: TextTheme.of(context).labelSmall?.copyWith(
             color: ColorScheme.of(context).outline,
@@ -146,7 +146,7 @@ class _GpuNextSettingsPageState extends State<GpuNextSettingsPage> {
         title: '渲染 API',
         value: Pref.gpuNextApi,
         values: GpuNextApi.values.map((e) => (e.value, e.label)).toList(),
-        subtitleBuilder: (context, index) => Text(
+        subtitleBuilder: (context, index, _) => Text(
           GpuNextApi.values[index].desc,
           style: TextTheme.of(context).labelSmall?.copyWith(
             color: ColorScheme.of(context).outline,

@@ -239,7 +239,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> seek(Duration position) {
     return onSeek?.call(position) ??
-        PlPlayerController.seekToIfExists(position, isSeek: false) ??
+        PlPlayerController.seekToIfExists(position) ??
         Future.syncValue(null);
   }
 

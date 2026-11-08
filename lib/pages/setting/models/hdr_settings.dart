@@ -246,7 +246,7 @@ Future<void> _showHdrOutputModeDialog(
       title: 'HDR 输出模式',
       value: Pref.hdrOutputMode,
       values: HdrOutputMode.values.map((e) => (e.value, e.label)).toList(),
-      subtitleBuilder: (context, index) => Text(
+      subtitleBuilder: (context, index, _) => Text(
         HdrOutputMode.values[index].desc,
         style: TextTheme.of(context).labelSmall?.copyWith(
           color: ColorScheme.of(context).outline,
@@ -311,7 +311,7 @@ Future<void> _showHdrHwdecDialog(
       title: 'HDR 解码方式',
       value: Pref.hdrHwdecMode,
       values: HdrHwdecMode.values.map((e) => (e.value, e.label)).toList(),
-      subtitleBuilder: (context, index) => Text(
+      subtitleBuilder: (context, index, _) => Text(
         HdrHwdecMode.values[index].desc,
         style: TextTheme.of(context).labelSmall?.copyWith(
           color: ColorScheme.of(context).outline,

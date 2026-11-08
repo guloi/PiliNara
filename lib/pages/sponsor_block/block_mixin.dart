@@ -106,12 +106,12 @@ mixin BlockMixin on GetxController {
         if (!naturalEntry && !skipWhenSeekIntoSegment) continue;
         switch (item.skipType) {
           case SkipType.alwaysSkip:
-            onSkip(item, isSeek: true);
+            onSkip(item);
             break;
           case SkipType.skipOnce:
             if (!item.hasSkipped) {
               item.hasSkipped = true;
-              onSkip(item, isSeek: true);
+              onSkip(item);
             }
             break;
           case SkipType.skipManually:
@@ -230,7 +230,7 @@ mixin BlockMixin on GetxController {
     }
   }
 
-  Future<void>? seekTo(Duration duration, {required bool isSeek});
+  Future<void>? seekTo(Duration duration);
 
   void _skipToast(SegmentModel item) {
     if (autoPlay && Pref.blockToast) {
@@ -241,16 +241,9 @@ mixin BlockMixin on GetxController {
     }
   }
 
-  Future<void> onSkip(
-    SegmentModel item, {
-    bool isSkip = true,
-    bool isSeek = true,
-  }) async {
+  Future<void> onSkip(SegmentModel item, {bool isSkip = true}) async {
     try {
-      await seekTo(
-        Duration(milliseconds: item.segment.$2),
-        isSeek: isSeek,
-      );
+      await seekTo(Duration(milliseconds: item.segment.$2));
       if (isSkip) {
         _skipToast(item);
       } else {
@@ -424,7 +417,6 @@ mixin BlockMixin on GetxController {
                             onSkip(
                               item,
                               isSkip: item.skipType != SkipType.showOnly,
-                              isSeek: false,
                             );
                           },
                           style: IconButton.styleFrom(
