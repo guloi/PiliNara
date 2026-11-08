@@ -135,9 +135,10 @@ class BottomControl extends StatelessWidget {
                         bottom: isDesktop ? desktopProgressHoverPadding : 5.25,
                         child: ViewPointDividerBar(
                           segments: videoDetailController.viewPointList,
-                          onSeek: PlatformUtils.isDesktop
-                              ? controller.seekTo
-                              : null,
+                          progress: controller.duration.value > 0
+                              ? controller.position.value /
+                                    controller.duration.value
+                              : 0.0,
                         ),
                       ),
                       if (!isPipMode &&
