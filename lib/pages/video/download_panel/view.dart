@@ -131,7 +131,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
   Widget _buildHeader() {
     final textStyle = TextStyle(color: colorScheme.onSurfaceVariant);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 0, 12),
+      padding: const .symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
           Text(
@@ -220,7 +220,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
             ),
           ] else if (kDebugMode)
             Padding(
-              padding: const .only(left: 6, right: 16),
+              padding: const .only(left: 6),
               child: Icon(
                 Icons.wifi,
                 size: 20,
@@ -294,7 +294,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
                             bvid: episode.bvid ?? IdUtils.av2bv(episode.aid!),
                             cidSet: cidSet,
                             onDownload: (part) => _onDownload(
-                              index: index,
+                              indexInSeason: index,
                               episode: part,
                               parent: episode,
                             ),
@@ -315,7 +315,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
 
   @pragma('vm:notify-debugger-on-exception')
   bool _onDownload({
-    required int index,
+    required int indexInSeason,
     required ugc.BaseEpisodeItem episode,
     bool isFromList = false,
     bool isDownloadAll = false,
@@ -344,7 +344,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
         if (isDownloadAll) {
           for (int i = 0; i < pages.length; i++) {
             _onDownload(
-              index: i,
+              indexInSeason: indexInSeason,
               episode: pages[i],
               parent: episode,
             );
@@ -360,7 +360,6 @@ class _DownloadPanelState extends State<DownloadPanel> {
       switch (episode) {
         case Part part:
           _downloadService.downloadVideo(
-            index: index,
             page: part,
             videoDetail: parent == null ? widget.videoDetail : null,
             videoArc: parent,
@@ -371,7 +370,6 @@ class _DownloadPanelState extends State<DownloadPanel> {
           break;
         case ugc.EpisodeItem episode:
           _downloadService.downloadVideo(
-            index: index,
             page: episode.pages!.first,
             videoDetail: null,
             videoArc: episode,
@@ -382,7 +380,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
           break;
         case pgc.EpisodeItem episode:
           _downloadService.downloadBangumi(
-            index: index,
+            index: indexInSeason,
             pgcItem: widget.pgcItem!,
             episode: episode,
             quality: _quality,
@@ -469,7 +467,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
               child: InkWell(
                 onTap: () {
                   if (_onDownload(
-                    index: index,
+                    indexInSeason: index,
                     episode: episode,
                     isFromList: true,
                   )) {
@@ -621,7 +619,7 @@ class _DownloadPanelState extends State<DownloadPanel> {
                 onConfirm: () {
                   for (int i = 0; i < widget.episodes.length; i++) {
                     _onDownload(
-                      index: i,
+                      indexInSeason: i,
                       episode: widget.episodes[i],
                       isDownloadAll: true,
                     );

@@ -1385,10 +1385,8 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         if (!plPlayerController.hasToasted) {
           plPlayerController
             ..seekToPos = null
-            ..hasToasted = true;
-          if (plPlayerController.showSeekPreview) {
-            plPlayerController.showPreview.value = false;
-          }
+            ..hasToasted = true
+            ..hidePreviewIfNeeded();
           SmartDialog.showAttach(
             targetContext: context,
             alignment: .center,

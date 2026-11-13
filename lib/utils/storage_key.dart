@@ -232,7 +232,8 @@ abstract final class SettingBoxKey {
       blockAtOnlyReply = 'blockAtOnlyReply',
       blockReplyAtCount = 'blockReplyAtCount',
       filterIntro = 'filterIntro',
-      showRefreshFAB = 'showRefreshFAB';
+      showRefreshFAB = 'showRefreshFAB',
+      autoWearMedal = 'autoWearMedal';
 
   static const String enableAiChat = 'enableAiChat',
       aiApiUrl = 'aiApiUrl',

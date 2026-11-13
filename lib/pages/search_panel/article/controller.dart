@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/models/common/search/article_search_type.dart';
 import 'package:PiliPlus/models/search/result.dart';
+import 'package:PiliPlus/pages/article/view.dart';
 import 'package:PiliPlus/pages/search/widgets/search_text.dart';
 import 'package:PiliPlus/pages/search_panel/controller.dart';
 import 'package:PiliPlus/utils/recommend_filter.dart';
@@ -31,15 +32,9 @@ class SearchArticleController
       caseSensitive: false,
     ).matchAsPrefix(keyword)?.group(2);
     if (cvid != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Get.toNamed(
-          '/articlePage',
-          parameters: {
-            'id': cvid,
-            'type': 'read',
-          },
-        );
-      });
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => ArticlePage.toArticlePage(id: cvid, type: .read),
+      );
     }
   }
 

@@ -35,10 +35,10 @@ void toastUpdateResult(bool dismiss, bool isSuccess) {
 mixin CommonDownloadActionMixin<T extends StatefulWidget>
     on BaseDownloadActionMixin<T, BiliDownloadEntryInfo> {
   @override
-  Future<void> onUpdate(
+  Future<bool> onUpdate(
     Future<bool> Function(BiliDownloadEntryInfo e) toElement,
   ) async {
-    if (checkUpdateCount(multiSelectCtr.checkedCount)) return;
+    if (checkUpdateCount(multiSelectCtr.checkedCount)) return false;
 
     bool dismiss = false;
     SmartDialog.showLoading(
@@ -59,6 +59,8 @@ mixin CommonDownloadActionMixin<T extends StatefulWidget>
     }
 
     toastUpdateResult(dismiss, isSuccess);
+
+    return isSuccess;
   }
 }
 
@@ -85,14 +87,22 @@ mixin BaseDownloadActionMixin<
   Future<void> updatePageSeg(DownloadPageInfo pageInfo) =>
       updatePage(pageInfo, downloadService.updateSegments);
 
+  Future<void> updatePageVolume(DownloadPageInfo pageInfo) =>
+      updatePage(pageInfo, downloadService.updateVolume);
+
   Future<void> updatePagePlayInfo(DownloadPageInfo pageInfo) =>
       updatePage(pageInfo, downloadService.updatePlayInfo);
 
-  Future<void> updatePage(
+  Future<void> updatePageSeasonInfo(DownloadPageInfo pageInfo) => updatePage(
+    pageInfo,
+    downloadService.updateSeasonInfo,
+  ).then(downloadService.refreshIfUpdated);
+
+  Future<bool> updatePage(
     DownloadPageInfo pageInfo,
     Future<bool> Function(BiliDownloadEntryInfo e) toElement,
   ) async {
-    if (checkUpdateCount(pageInfo.entries.length)) return;
+    if (checkUpdateCount(pageInfo.entries.length)) return false;
 
     bool dismiss = false;
     SmartDialog.showLoading(onDismiss: () => dismiss = true);
@@ -108,6 +118,8 @@ mixin BaseDownloadActionMixin<
     }
 
     toastUpdateResult(dismiss, isSuccess);
+
+    return isSuccess;
   }
 
   Future<void> updateSeasonDm(DownloadSeasonInfo season) => updateSeason(
@@ -118,6 +130,16 @@ mixin BaseDownloadActionMixin<
   /// 更新一个合集 / PGC 一季的空降片段。
   Future<void> updateSeasonSeg(DownloadSeasonInfo season) =>
       updateSeason(season, downloadService.updateSegments);
+
+  /// 更新一个合集 / PGC 一季的全部条目的音量均衡。
+  Future<void> updateSeasonVolume(DownloadSeasonInfo season) =>
+      updateSeason(season, downloadService.updateVolume);
+
+  /// 更新一个合集 / PGC 一季的合集信息。
+  Future<void> updateSeasonSeasonInfo(DownloadSeasonInfo season) => updateSeason(
+    season,
+    downloadService.updateSeasonInfo,
+  ).then(downloadService.refreshIfUpdated);
 
   /// 更新一个合集 / PGC 一季的字幕 / 分段信息。
   Future<void> updateSeasonPlayInfo(DownloadSeasonInfo season) =>
@@ -161,7 +183,7 @@ mixin BaseDownloadActionMixin<
     toastUpdateResult(dismiss, isSuccess);
   }
 
-  void onUpdate(
+  Future<bool> onUpdate(
     Future<bool> Function(BiliDownloadEntryInfo e) toElement,
   );
 
@@ -170,6 +192,12 @@ mixin BaseDownloadActionMixin<
   }
 
   void _onUpdateSeg() => onUpdate(downloadService.updateSegments);
+
+  void _onUpdateVolume() => onUpdate(downloadService.updateVolume);
+
+  void _onUpdateSeasonInfo() =>
+      onUpdate(downloadService.updateSeasonInfo)
+          .then(downloadService.refreshIfUpdated);
 
   void _onUpdatePlayInfo() => onUpdate(downloadService.updatePlayInfo);
 
@@ -188,6 +216,14 @@ mixin BaseDownloadActionMixin<
         PopupMenuItem(
           onTap: _onUpdateSeg,
           child: const Text('更新片段'),
+        ),
+        PopupMenuItem(
+          onTap: _onUpdateSeasonInfo,
+          child: const Text('更新合集信息'),
+        ),
+        PopupMenuItem(
+          onTap: _onUpdateVolume,
+          child: const Text('更新音量均衡'),
         ),
         PopupMenuItem(
           onTap: _onUpdatePlayInfo,
