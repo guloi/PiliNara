@@ -5,7 +5,7 @@
 
 
 <div align="center">
-    <h1>PiliNara</h1>
+    <h1>Piliruao</h1>
 <div align="center">
 
 </div>
@@ -49,7 +49,6 @@ Fork特性：
 - [x] Windows
 - [x] Linux
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/pilinara.svg)](https://repology.org/project/pilinara/versions)
 
 ## refactor
 
@@ -228,7 +227,7 @@ Fork特性：
 
 ## 下载
 
-可以从 [Releases](https://github.com/Starfallan/PiliNara/releases) 下载，或克隆仓库拉取代码后在本地编译。
+可以从 [Releases](https://github.com/guloi/Piliruao/releases) 下载，或克隆仓库拉取代码后在本地编译。
 
 ### Arch Linux
 
@@ -261,7 +260,7 @@ yay -S pilinara-bin
 
 ## 声明
 
-此项目（PiliNara）是个人为了兴趣而开发，仅用于学习和测试，请于下载后24小时内删除。
+此项目（Piliruao）是个人为了兴趣而开发，仅用于学习和测试，请于下载后24小时内删除。
 所用API皆从官方网站收集，不提供任何破解内容。
 在此致敬原作者：[guozhigq/pilipala](https://github.com/guozhigq/pilipala)
 在此致敬上游作者：[Starfallan/PiliNara](https://github.com/Starfallan/PiliNara)
