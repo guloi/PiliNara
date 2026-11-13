@@ -251,7 +251,7 @@ class _LikeMePageState extends State<LikeMePage> {
             nativeUri == null || nativeUri.isEmpty || nativeUri.startsWith('?');
         if (item.counts! > 1) {
           Get.toNamed(
-            'msgLikeDetail',
+            '/msgLikeDetail',
             arguments: {
               'id': item.id!.toString(),
               if (!isInvalid) 'uri': nativeUri,
