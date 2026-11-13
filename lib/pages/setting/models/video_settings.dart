@@ -38,7 +38,7 @@ List<SettingsModel> get videoSettings => [
     title: 'HDR / 杜比视界',
     subtitle: 'HDR 直通、渲染后端、色调映射、解码方式与杜比视界兼容',
     leading: const Icon(Icons.hdr_strong),
-    onTap: (_, _) => Get.to(() => const HdrSettingsPage()),
+    onTap: (_, _) => Get.toNamed('/hdrSetting'),
   ),
   if (Platform.isAndroid)
     SplitModel(
@@ -65,7 +65,7 @@ List<SettingsModel> get videoSettings => [
         setKey: SettingBoxKey.defaultGpuNext,
         defaultVal: false,
         onChanged: (_) => PlPlayerController.instance?.applyHdrOptions(),
-        onTap: (_) => Get.to(() => const GpuNextSettingsPage()),
+        onTap: (_) => Get.toNamed('/gpuNextSetting'),
       ),
     ),
   const SwitchModel(
