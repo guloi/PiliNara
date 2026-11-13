@@ -121,10 +121,14 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
         run: |
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          APKSIGNER=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}" -type f -name apksigner 2>/dev/null | sort -V | tail -1)
+          echo "apksigner: ${APKSIGNER:-not found}"
           for file in PiliNara_android_*.apk; do
             echo "== $file"
-            "$APKSIGNER" verify --print-certs "$file" | grep -E "Signer #1 certificate (DN|SHA-256)" || true
+            if [ -n "$APKSIGNER" ]; then
+              "$APKSIGNER" verify --print-certs "$file" | grep -E "Signer #1 certificate (DN|SHA-256)" || true
+            fi
+            keytool -printcert -jarfile "$file" | grep -E "^(Owner|Issuer|所有者)" || true
           done
 
       - name: Release
