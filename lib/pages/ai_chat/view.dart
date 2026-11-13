@@ -78,7 +78,7 @@ class _AiChatPageState extends State<AiChatPage>
       if (!HardwareKeyboard.instance.isShiftPressed) {
         final state =
             node.context?.findAncestorStateOfType<_AiChatPageState>();
-        if (state != null && !state.chatCtl.isAnalyzing.value) {
+        if (state != null && !state.chatCtl.isRequesting.value) {
           state._sendCustomPrompt();
         }
         return KeyEventResult.handled;
@@ -499,7 +499,7 @@ class _AiChatPageState extends State<AiChatPage>
           ),
           const SizedBox(width: 12),
           Obx(() {
-            final analyzing = chatCtl.isAnalyzing.value;
+            final analyzing = chatCtl.isRequesting.value;
             final hasContext = chatCtl.hasVideoContext.value;
             final hasSubs = chatCtl.hasSubtitles;
             return Row(
@@ -949,7 +949,7 @@ class _AiChatPageState extends State<AiChatPage>
           ),
           const SizedBox(width: 8),
           Obx(() => IconButton.filled(
-                onPressed: chatCtl.isAnalyzing.value ? null : _sendCustomPrompt,
+                onPressed: chatCtl.isRequesting.value ? null : _sendCustomPrompt,
                 icon: const Icon(Icons.send),
               )),
         ],

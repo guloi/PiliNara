@@ -180,3 +180,4 @@ test*
 /crash_custom.log
 
 /.tmp/
+.dsh-tmp/

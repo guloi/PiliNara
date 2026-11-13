@@ -5097,7 +5097,6 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   void hidePreview() {
-    hoverDx = null;
     showPreview.value = false;
   }
 

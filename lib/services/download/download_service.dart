@@ -900,7 +900,7 @@ class DownloadService extends GetxService {
         ),
         // ugc segments
         if (entry.pageData != null && Pref.enableSponsorBlock)
-          _updateBlockSegments(entry),
+          updateUgcSegments(entry),
         if (cachePlayInfo) updatePlayInfo(entry),
       ]);
 

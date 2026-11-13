@@ -163,7 +163,7 @@ class _DownloadFolderPageState extends State<DownloadFolderPage>
   }
 
   @override
-  Future<void> onUpdate(
+  Future<bool> onUpdate(
     Future<bool> Function(BiliDownloadEntryInfo e) toElement,
   ) async {
     if (checkUpdateCount(checkedCount)) {
@@ -197,6 +197,7 @@ class _DownloadFolderPageState extends State<DownloadFolderPage>
     }
 
     toastUpdateResult(dismiss, isSuccess);
+    return isSuccess;
   }
 
   /// 播放全部：把文件夹下所有单视频、合集里的子视频、分P 里的子视频现场递归
@@ -405,7 +406,9 @@ class _DownloadFolderPageState extends State<DownloadFolderPage>
         progress: _progress,
         updateSeasonDm: updateSeasonDm,
         updateSeasonSeg: updateSeasonSeg,
+        updateSeasonVolume: updateSeasonVolume,
         updateSeasonPlayInfo: updateSeasonPlayInfo,
+        updateSeasonSeasonInfo: updateSeasonSeasonInfo,
       );
     }
 
@@ -421,7 +424,9 @@ class _DownloadFolderPageState extends State<DownloadFolderPage>
         progress: _progress,
         updatePageDm: updatePageDm,
         updatePageSeg: updatePageSeg,
+        updatePageVolume: updatePageVolume,
         updatePagePlayInfo: updatePagePlayInfo,
+        updatePageSeasonInfo: updatePageSeasonInfo,
       );
     }
 

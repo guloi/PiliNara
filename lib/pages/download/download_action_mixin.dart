@@ -136,17 +136,17 @@ mixin BaseDownloadActionMixin<
       updateSeason(season, downloadService.updateVolume);
 
   /// 更新一个合集 / PGC 一季的合集信息。
-  Future<void> updateSeasonSeasonInfo(DownloadSeasonInfo season) => updateSeason(
-    season,
-    downloadService.updateSeasonInfo,
-  ).then(downloadService.refreshIfUpdated);
+  Future<void> updateSeasonSeasonInfo(DownloadSeasonInfo season) async {
+    final isSuccess = await updateSeason(season, downloadService.updateSeasonInfo);
+    downloadService.refreshIfUpdated(isSuccess);
+  }
 
   /// 更新一个合集 / PGC 一季的字幕 / 分段信息。
   Future<void> updateSeasonPlayInfo(DownloadSeasonInfo season) =>
       updateSeason(season, downloadService.updatePlayInfo);
 
   /// 更新一个合集 / PGC 一季的所有条目，按页并发。
-  Future<void> updateSeason(
+  Future<bool> updateSeason(
     DownloadSeasonInfo season,
     Future<bool> Function(BiliDownloadEntryInfo e) toElement,
   ) async {
@@ -181,6 +181,7 @@ mixin BaseDownloadActionMixin<
     }
 
     toastUpdateResult(dismiss, isSuccess);
+    return isSuccess;
   }
 
   Future<bool> onUpdate(
