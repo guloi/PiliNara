@@ -92,6 +92,9 @@ jobs:
             echo storePassword='${{ secrets.KEYSTORE_PASSWORD }}' >> android/key.properties
             echo keyAlias='${{ secrets.KEY_ALIAS }}' >> android/key.properties
             echo keyPassword='${{ secrets.KEY_PASSWORD }}' >> android/key.properties
+            echo "injected release signing key"
+          else
+            echo "::warning::SIGN_KEYSTORE_BASE64 not set; APKs will be signed with a throwaway debug key (different every run, cannot update-install over previous builds)"
           fi
 
       - name: Set and Extract version
@@ -112,6 +115,16 @@ jobs:
           for file in build/app/outputs/flutter-apk/app-*-release.apk; do
             abi=$(echo "$file" | sed -E 's|.*app-(.*)-release\.apk|\1|')
             mv "$file" "PiliNara_android_${{ env.version }}_${abi}.apk"
+          done
+
+      - name: Verify APK signature
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          for file in PiliNara_android_*.apk; do
+            echo "== $file"
+            "$APKSIGNER" verify --print-certs "$file" | grep -E "Signer #1 certificate (DN|SHA-256)" || true
           done
 
       - name: Release
