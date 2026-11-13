@@ -46,13 +46,13 @@ jobs:
         run: flutter build linux --release --dart-define-from-file=pili_release.json --no-pub
 
       - name: Package .tar.gz
-        run: tar -zcvf PiliNara_linux_${{ env.version }}_amd64.tar.gz -C build/linux/x64/release/bundle .
+        run: tar -zcvf piliruao_linux_${{ env.version }}_amd64.tar.gz -C build/linux/x64/release/bundle .
 
       - name: Packege deb
         run: |
           printf "建立构建目录...\n"
-          mkdir "PiliNara_linux_${{ env.version }}_amd64"
-          pushd "PiliNara_linux_${{ env.version }}_amd64"
+          mkdir "piliruao_linux_${{ env.version }}_amd64"
+          pushd "piliruao_linux_${{ env.version }}_amd64"
           mkdir -p opt/PiliNara
           mkdir -p usr/share/applications
           mkdir -p usr/share/icons/hicolor/512x512/apps
@@ -87,8 +87,8 @@ jobs:
 
           printf "打包 deb 文件...\n"
           popd
-          dpkg-deb --build --verbose --root-owner-group "PiliNara_linux_${{ env.version }}_amd64"
-          printf "完成: PiliNara_linux_%s_amd64.deb\n" "${{ env.version }}"
+          dpkg-deb --build --verbose --root-owner-group "piliruao_linux_${{ env.version }}_amd64"
+          printf "完成: piliruao_linux_%s_amd64.deb\n" "${{ env.version }}"
         shell: bash
 
       - name: Packege rpm
@@ -165,9 +165,9 @@ jobs:
           rpmbuild --define "_topdir $RPM_BUILD_ROOT" -bb "$RPM_BUILD_ROOT/SPECS/pilinara.spec"
 
           printf "移动生成的 RPM...\n"
-          find "$RPM_BUILD_ROOT/RPMS" -name "*.rpm" -exec mv {} "PiliNara_linux_${{ env.version }}_amd64.rpm" \;
+          find "$RPM_BUILD_ROOT/RPMS" -name "*.rpm" -exec mv {} "piliruao_linux_${{ env.version }}_amd64.rpm" \;
 
-          printf "完成: PiliNara_linux_%s_amd64.rpm\n" "${{ env.version }}"
+          printf "完成: piliruao_linux_%s_amd64.rpm\n" "${{ env.version }}"
         shell: bash
 
       - name: Package AppImage
@@ -208,9 +208,9 @@ jobs:
           sed -i 's|Icon=pilinara|Icon=pilinara|g' "$APPDIR/com.example.pilinara.desktop"
 
           printf "打包 AppImage...\n"
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage "$APPDIR" "PiliNara_linux_${{ env.version }}_amd64.AppImage"
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage "$APPDIR" "piliruao_linux_${{ env.version }}_amd64.AppImage"
 
-          printf "完成: PiliNara_linux_%s_amd64.AppImage\n" "${{ env.version }}"
+          printf "完成: piliruao_linux_%s_amd64.AppImage\n" "${{ env.version }}"
         shell: bash
 
       - name: Release
@@ -221,35 +221,35 @@ jobs:
           name: ${{ github.event.inputs.tag }}
           target_commitish: ${{ github.sha }}
           files: |
-            PiliNara_linux_*.tar.gz
-            PiliNara_linux_*.deb
-            PiliNara_linux_*.rpm
-            PiliNara_linux_*.AppImage
+            piliruao_linux_*.tar.gz
+            piliruao_linux_*.deb
+            piliruao_linux_*.rpm
+            piliruao_linux_*.AppImage
 
       - name: Upload linux targz package
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Linux_targz_amd64_packege
-          path: PiliNara_linux_*.tar.gz
+          path: piliruao_linux_*.tar.gz
 
       - name: Upload linux deb package
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Linux_deb_amd64_package
-          path: PiliNara_linux_*.deb
+          path: piliruao_linux_*.deb
 
       - name: Upload linux rpm package
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Linux_rpm_amd64_package
-          path: PiliNara_linux_*.rpm
+          path: piliruao_linux_*.rpm
 
       - name: Upload linux AppImage package
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Linux_AppImage_amd64_package
-          path: PiliNara_linux_*.AppImage
+          path: piliruao_linux_*.AppImage

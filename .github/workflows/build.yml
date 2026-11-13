@@ -114,7 +114,7 @@ jobs:
         run: |
           for file in build/app/outputs/flutter-apk/app-*-release.apk; do
             abi=$(echo "$file" | sed -E 's|.*app-(.*)-release\.apk|\1|')
-            mv "$file" "PiliNara_android_${{ env.version }}_${abi}.apk"
+            mv "$file" "piliruao_android_${{ env.version }}_${abi}.apk"
           done
 
       - name: Verify APK signature
@@ -123,7 +123,7 @@ jobs:
         run: |
           APKSIGNER=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}" -type f -name apksigner 2>/dev/null | sort -V | tail -1)
           echo "apksigner: ${APKSIGNER:-not found}"
-          for file in PiliNara_android_*.apk; do
+          for file in piliruao_android_*.apk; do
             echo "== $file"
             if [ -n "$APKSIGNER" ]; then
               "$APKSIGNER" verify --print-certs "$file" | grep -E "Signer #1 certificate (DN|SHA-256)" || true
@@ -138,28 +138,28 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           name: ${{ github.event.inputs.tag }}
           target_commitish: ${{ github.sha }}
-          files: PiliNara_android_*.apk
+          files: piliruao_android_*.apk
 
       - name: Upload arm64-v8a
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Android_arm64-v8a
-          path: PiliNara_android_*_arm64-v8a.apk
+          path: piliruao_android_*_arm64-v8a.apk
 
       - name: Upload armeabi-v7a
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Android_armeabi-v7a
-          path: PiliNara_android_*_armeabi-v7a.apk
+          path: piliruao_android_*_armeabi-v7a.apk
 
       - name: Upload x86_64
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Android_x86_64
-          path: PiliNara_android_*_x86_64.apk
+          path: piliruao_android_*_x86_64.apk
 
   ios:
     if: ${{ (github.event_name == 'pull_request' && github.repository == 'Starfallan/PiliNara') || github.event.inputs.build_ios == 'true' }}

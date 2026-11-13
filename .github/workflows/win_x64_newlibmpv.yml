@@ -61,11 +61,11 @@ jobs:
           mkdir -p Release/PiliNara-Win
           mkdir -p PiliNara-Win-Setup
           mv build/windows/x64/runner/Release/* Release/PiliNara-Win/
-          mv dist/**/*.exe PiliNara-Win-Setup/PiliNara_windows_${{env.version}}_x64_NewLibmpv_setup.exe
+          mv dist/**/*.exe PiliNara-Win-Setup/piliruao_windows_${{env.version}}_x64_NewLibmpv_setup.exe
 
       - name: Compress
         run: |
-          Compress-Archive -Path "Release/PiliNara-Win" -DestinationPath "PiliNara_windows_${{env.version}}_x64_NewLibmpv_portable.zip"
+          Compress-Archive -Path "Release/PiliNara-Win" -DestinationPath "piliruao_windows_${{env.version}}_x64_NewLibmpv_portable.zip"
         shell: pwsh
 
       - name: Release
@@ -76,19 +76,19 @@ jobs:
           name: ${{ github.event.inputs.tag }}
           target_commitish: ${{ github.sha }}
           files: |
-            PiliNara_windows_*_NewLibmpv_portable.zip
-            PiliNara-Win-Setup/PiliNara_windows_*_NewLibmpv_setup.exe
+            piliruao_windows_*_NewLibmpv_portable.zip
+            PiliNara-Win-Setup/piliruao_windows_*_NewLibmpv_setup.exe
 
       - name: Upload windows file release
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Windows-file-x64-NewLibmpv-release
-          path: PiliNara_windows_*_NewLibmpv_portable.zip
+          path: piliruao_windows_*_NewLibmpv_portable.zip
 
       - name: Upload windows setup release
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: Windows-setup-x64-NewLibmpv-release
-          path: PiliNara-Win-Setup/PiliNara_windows_*_NewLibmpv_setup.exe
+          path: PiliNara-Win-Setup/piliruao_windows_*_NewLibmpv_setup.exe
