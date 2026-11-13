@@ -153,7 +153,7 @@ mixin BaseDownloadActionMixin<
     if (checkUpdateCount(
       season.pages.fold(0, (a, b) => a + b.entries.length),
     )) {
-      return;
+      return false;
     }
 
     bool dismiss = false;

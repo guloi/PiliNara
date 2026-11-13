@@ -167,7 +167,7 @@ class _DownloadFolderPageState extends State<DownloadFolderPage>
     Future<bool> Function(BiliDownloadEntryInfo e) toElement,
   ) async {
     if (checkUpdateCount(checkedCount)) {
-      return;
+      return false;
     }
     final entries = <int, BiliDownloadEntryInfo>{
       for (final item in allChecked)
@@ -175,7 +175,7 @@ class _DownloadFolderPageState extends State<DownloadFolderPage>
           entry.cid: entry,
     };
     if (entries.isEmpty) {
-      return;
+      return false;
     }
 
     bool dismiss = false;
