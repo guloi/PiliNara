@@ -472,7 +472,8 @@ mpv 客户端的日志级别由 `PlayerConfiguration.logLevel` 决定（默认 r
 `mpv_request_log_messages` 下发（media_kit 没有 setLogLevel），**改完要重新打开
 视频**才生效；对话框里的内容仍是打开那一刻抓的，重开视频后再看才是新级别的输出。
 
-诊断里的「mpv 日志: 要求 v，已收到 …」那一行是按 level 统计的到达计数：
+诊断里的「mpv 日志: 要求 <级别>，已收到 …」那一行是按 level 统计的到达计数
+（关闭诊断时级别固定 error，也会照实显示）：
 如果 `v` 一直是 0，问题在 media_kit / libmpv 没放开，而不是这边的
 过滤条件写错了（早先版本确实按关键字把 libplacebo 的行误杀过一轮）。
 

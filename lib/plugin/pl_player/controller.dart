@@ -1632,7 +1632,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             '（"-" 表示当前 libmpv 没有 android-vulkan-hdr 补丁，需重建）',
       if (_lastFallbackReason != null) '自动回退原因: $_lastFallbackReason',
       if (_mpvErrorLog.isNotEmpty) 'mpv 错误: ${_mpvErrorLog.last}',
-      'mpv 日志: 要求 v，已收到 '
+      // 关闭诊断时日志等级被固定成 error（见 docs/hdr.md 7.9），这里照实写。
+      'mpv 日志: 要求 ${Pref.hdrDebug ? Pref.logLevelType.label : 'error（诊断关闭）'}，已收到 '
           '${_mpvLogLevelCounts.entries.map((e) => '${e.key}=${e.value}').join(' ')}',
       if (_mpvVoLog.isNotEmpty)
         'mpv VO 日志（最近 ${_mpvVoLog.length} 条，--- 开头是应用侧动作）:\n'
