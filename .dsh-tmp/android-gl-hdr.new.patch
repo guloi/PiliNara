@@ -1,0 +1,190 @@
+diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_android.c
+index 0a12cf8..ff511ee 100644
+--- a/video/out/opengl/context_android.c
++++ b/video/out/opengl/context_android.c
+@@ -15,6 +15,12 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include <dlfcn.h>
++#include <string.h>
++
++#include <android/data_space.h>
++#include <android/native_window.h>
++
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+ 
+@@ -23,6 +29,105 @@
+ #include "common/common.h"
+ #include "context.h"
+ 
++// PiliNara: Android/EGL（gpu-next + gpu-api=opengl）下的 HDR 输出。
++//
++// Vulkan WSI 在 Android 上只给线性（没压缩）缓冲，全屏/横屏需要旋转图层时
++// SurfaceFlinger 只能退回 CLIENT（GPU）合成，PQ 画面被画进 SDR 的 client
++// target，表现为「暗了非常多」。EGL/gralloc 的窗口缓冲是 UBWC 压缩的，
++// HWC 可以直接合成（含旋转），所以这里把 EGL 窗口切成 10bit RGBA +
++// BT.2020/PQ dataspace，再让 libplacebo 按 PQ 编码输出。
++#ifndef AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM
++#define AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM 0x2b
++#endif
++
++#ifndef ADATASPACE_BT2020_PQ
++#define ADATASPACE_BT2020_PQ 163971072
++#endif
++
++// eglCreateWindowSurface 的 EGL_GL_COLORSPACE_KHR 属性（EGL_EXT_gl_colorspace_bt2020_pq）。
++// 这一步很关键：EGL 驱动会给每次 eglSwapBuffers 入队的缓冲打上自己的 dataspace，
++// 只调 ANativeWindow_setBuffersDataSpace 的话会被 EGL 打回 sRGB，表现为
++// 「亮度对了但画面发灰」（PQ 数据被当 SDR 解释）。
++#ifndef EGL_GL_COLORSPACE_KHR
++#define EGL_GL_COLORSPACE_KHR 0x309D
++#endif
++
++#ifndef EGL_GL_COLORSPACE_BT2020_PQ_EXT
++#define EGL_GL_COLORSPACE_BT2020_PQ_EXT 0x3340
++#endif
++
++// ANativeWindow_setBuffersDataSpace 是 API 28 才导出的符号，而 libmpv 以
++// API 24 为最低版本编译，直接调用会让库在旧系统上加载失败，故用 dlsym 取。
++typedef int32_t (*set_buffers_dataspace_fn)(ANativeWindow *window, int32_t dataSpace);
++
++static void android_gl_set_dataspace(ANativeWindow *window, int32_t dataspace)
++{
++    static set_buffers_dataspace_fn fn;
++    static bool resolved;
++    if (!resolved) {
++        resolved = true;
++        fn = (set_buffers_dataspace_fn)dlsym(RTLD_DEFAULT,
++                                             "ANativeWindow_setBuffersDataSpace");
++    }
++    if (fn)
++        fn(window, dataspace);
++}
++
++// 是否按 HDR 输出，由 --android-vulkan-hdr 决定（播放器在打开 HDR /
++// 杜比视界片源前设置，SDR 片源保持关闭）。
++static bool android_gl_is_hdr(struct ra_ctx *ctx)
++{
++    return ctx->vo && ctx->vo->opts && ctx->vo->opts->android_vulkan_hdr;
++}
++
++// 告诉 vo_gpu_next 交换链的目标是 HDR10（BT.2020/PQ）。它据此把 hint 设成
++// HDR10，libplacebo 才会按 PQ 编码而不是先 tone map 回 SDR。
++static pl_color_space_t android_gl_preferred_csp(struct ra_ctx *ctx)
++{
++    if (!android_gl_is_hdr(ctx))
++        return (pl_color_space_t){0};
++    return pl_color_space_hdr10;
++}
++
++// EGL_EXT_gl_colorspace_bt2020_pq 是否可用（Adreno 一般有，部分 Mali 没有）。
++static bool android_gl_supports_bt2020pq(EGLDisplay display)
++{
++    const char *exts = eglQueryString(display, EGL_EXTENSIONS);
++    return exts && strstr(exts, "EGL_EXT_gl_colorspace_bt2020_pq");
++}
++
++struct android_gl_cb {
++    struct ra_ctx *ctx;
++    EGLDisplay display;
++};
++
++// 在 eglChooseConfig 给的候选里优先挑 10bit 的配置。EGL_RED_SIZE 只是
++// 下限，10bit 配置也会出现在列表里；一个都没有时回退 0（8bit），
++// 保证画面能出，只是 PQ 会有色带。
++static int android_gl_refine_config(void *user_data, EGLConfig *configs,
++                                    int num_configs)
++{
++    struct android_gl_cb *cb = user_data;
++
++    if (!android_gl_is_hdr(cb->ctx))
++        return 0;
++
++    for (int i = 0; i < num_configs; i++) {
++        EGLint r = 0, g = 0, b = 0;
++        eglGetConfigAttrib(cb->display, configs[i], EGL_RED_SIZE, &r);
++        eglGetConfigAttrib(cb->display, configs[i], EGL_GREEN_SIZE, &g);
++        eglGetConfigAttrib(cb->display, configs[i], EGL_BLUE_SIZE, &b);
++        if (r >= 10 && g >= 10 && b >= 10) {
++            MP_VERBOSE(cb->ctx, "Android/EGL: 选中 10bit EGLConfig (%d/%d/%d)\n",
++                       (int)r, (int)g, (int)b);
++            return i;
++        }
++    }
++
++    MP_WARN(cb->ctx, "Android/EGL: 没有 10bit 的 EGLConfig，HDR 退化成 8bit\n");
++    return 0;
++}
++
+ struct priv {
+     struct GL gl;
+     EGLDisplay egl_display;
+@@ -66,7 +171,14 @@ static bool android_init(struct ra_ctx *ctx)
+     }
+ 
+     EGLConfig config;
+-    if (!mpegl_create_context(ctx, p->egl_display, &p->egl_context, &config))
++    struct android_gl_cb cb = {
++        .ctx = ctx,
++        .display = p->egl_display,
++    };
++    if (!mpegl_create_context_cb(ctx, p->egl_display,
++                                 (struct mpegl_cb){ .refine_config = android_gl_refine_config,
++                                                    .user_data = &cb },
++                                 &p->egl_context, &config))
+         goto fail;
+ 
+     ANativeWindow *native_window = vo_android_native_window(ctx->vo);
+@@ -74,8 +186,32 @@ static bool android_init(struct ra_ctx *ctx)
+     eglGetConfigAttrib(p->egl_display, config, EGL_NATIVE_VISUAL_ID, &format);
+     ANativeWindow_setBuffersGeometry(native_window, 0, 0, format);
+ 
++    // setBuffersGeometry 会把 dataspace 复位成 UNKNOWN，HDR 时必须重新声明
++    // BT.2020/PQ，否则系统会把 PQ 数据当 SDR 解释（画面发灰/偏暗）。
++    if (android_gl_is_hdr(ctx)) {
++        android_gl_set_dataspace(native_window, ADATASPACE_BT2020_PQ);
++        MP_VERBOSE(ctx, "Android/EGL: 以 10bit BT.2020/PQ 输出（HDR）\n");
++    }
++
++    const EGLint hdr_cs_attribs[] = {
++        EGL_GL_COLORSPACE_KHR, EGL_GL_COLORSPACE_BT2020_PQ_EXT,
++        EGL_NONE,
++    };
++    bool hdr_cs = android_gl_is_hdr(ctx) &&
++                  android_gl_supports_bt2020pq(p->egl_display);
+     p->egl_surface = eglCreateWindowSurface(p->egl_display, config,
++                                    (EGLNativeWindowType)native_window,
++                                    hdr_cs ? hdr_cs_attribs : NULL);
++    if (p->egl_surface != EGL_NO_SURFACE && hdr_cs) {
++        MP_VERBOSE(ctx, "Android/EGL: 面色彩空间 = BT.2020/PQ"
++                   "（EGL_EXT_gl_colorspace_bt2020_pq）\n");
++    }
++    if (p->egl_surface == EGL_NO_SURFACE && hdr_cs) {
++        // 驱动声称支持但建面失败时退回默认色彩空间，至少能出画。
++        MP_WARN(ctx, "Android/EGL: 指定 BT.2020/PQ 色彩空间失败，退回默认\n");
++        p->egl_surface = eglCreateWindowSurface(p->egl_display, config,
+                                     (EGLNativeWindowType)native_window, NULL);
++    }
+ 
+     if (p->egl_surface == EGL_NO_SURFACE) {
+         MP_FATAL(ctx, "Could not create EGL surface!\n");
+@@ -92,6 +228,7 @@ static bool android_init(struct ra_ctx *ctx)
+ 
+     struct ra_ctx_params params = {
+         .swap_buffers = android_swap_buffers,
++        .preferred_csp = android_gl_preferred_csp,
+     };
+ 
+     if (!ra_gl_ctx_init(ctx, &p->gl, params))
+@@ -114,6 +251,9 @@ static bool android_reconfig(struct ra_ctx *ctx)
+     if (native_window) {
+         int32_t current_format = ANativeWindow_getFormat(native_window);
+         ANativeWindow_setBuffersGeometry(native_window, w, h, current_format);
++        // 尺寸变化同样会复位 dataspace，HDR 时补回 BT.2020/PQ
++        if (android_gl_is_hdr(ctx))
++            android_gl_set_dataspace(native_window, ADATASPACE_BT2020_PQ);
+     }
+ 
+     ctx->vo->dwidth = w;

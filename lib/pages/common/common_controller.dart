@@ -63,16 +63,9 @@ mixin ScrollOrRefreshMixin {
 }
 
 abstract class CommonController<R, T> extends GetxController
-    with ScrollOrRefreshMixin {
+    with ScrollOrRefreshMixin, RefreshImplMixin {
   @override
   final ScrollController scrollController = ScrollController();
-
-  final GlobalKey<RefreshIndicatorState> refreshKey =
-      GlobalKey<RefreshIndicatorState>();
-
-  @override
-  Future<void> showRefresh() =>
-      refreshKey.currentState?.show() ?? onRefresh();
 
   bool isLoading = false;
   Rx<LoadingState> get loadingState;

@@ -1,0 +1,153 @@
+diff --git a/options/options.c b/options/options.c
+index 716c3e6..8fe6a06 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -244,6 +244,7 @@ static const m_option_t mp_vo_opt_list[] = {
+ #endif
+ #if HAVE_EGL_ANDROID
+     {"android-surface-size", OPT_SIZE_BOX(android_surface_size)},
++    {"android-vulkan-hdr", OPT_BOOL(android_vulkan_hdr)},
+ #endif
+ #if HAVE_D3D11
+     {"d3d11-composition-size", OPT_SIZE_BOX(d3d11_composition_size)},
+diff --git a/options/options.h b/options/options.h
+index 12dafea..71e2283 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -86,6 +86,9 @@ typedef struct mp_vo_opts {
+ 
+     struct m_geometry android_surface_size;
+ 
++    // Android/Vulkan 下按 HDR10（10bit BT.2020/PQ）输出。
++    bool android_vulkan_hdr;
++
+     struct m_geometry d3d11_composition_size;
+ 
+     int swapchain_depth;  // max number of images to render ahead
+diff --git a/video/out/vulkan/context_android.c b/video/out/vulkan/context_android.c
+index 512830d..2774565 100644
+--- a/video/out/vulkan/context_android.c
++++ b/video/out/vulkan/context_android.c
+@@ -15,6 +15,11 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include <dlfcn.h>
++
++#include <android/data_space.h>
++#include <android/native_window.h>
++
+ #include <vulkan/vulkan.h>
+ #include <vulkan/vulkan_android.h>
+ 
+@@ -23,6 +28,67 @@
+ #include "context.h"
+ #include "utils.h"
+ 
++// 10bit RGBA 与 BT.2020/PQ 的 dataspace 在旧 NDK 头文件里未必存在，
++// 这里给出兜底定义（数值与 android/hardware_buffer.h、android/data_space.h 一致）。
++#ifndef AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM
++#define AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM 0x2b
++#endif
++
++#ifndef ADATASPACE_BT2020_PQ
++#define ADATASPACE_BT2020_PQ 163971072
++#endif
++
++// ANativeWindow_setBuffersDataSpace 是 API 28 才导出的符号，而 libmpv 以
++// API 24 为最低版本编译，直接调用会让库在旧系统上加载失败，故用 dlsym 取。
++typedef int32_t (*set_buffers_dataspace_fn)(ANativeWindow *window, int32_t dataSpace);
++
++static void android_set_dataspace(ANativeWindow *window, int32_t dataspace)
++{
++    static set_buffers_dataspace_fn fn;
++    static bool resolved;
++    if (!resolved) {
++        resolved = true;
++        fn = (set_buffers_dataspace_fn)dlsym(RTLD_DEFAULT,
++                                             "ANativeWindow_setBuffersDataSpace");
++    }
++    if (fn)
++        fn(window, dataspace);
++}
++
++// 是否按 HDR 输出，由 --android-vulkan-hdr 决定（播放器在打开 HDR /
++// 杜比视界片源前设置，SDR 片源保持关闭）。
++static bool android_is_hdr(struct ra_ctx *ctx)
++{
++    return ctx->vo && ctx->vo->opts && ctx->vo->opts->android_vulkan_hdr;
++}
++
++// 把原生窗口切成 10bit BT.2020/PQ。Vulkan WSI 会据此为 surface 报出 HDR 的
++// format / colorSpace，libplacebo 才会按 PQ 渲染，Android 显示端也才会把
++// 面板切进 HDR。ANativeWindow_setBuffersGeometry 会把 dataspace 复位成
++// UNKNOWN，所以每次尺寸变化后都要重新下发。
++static void android_apply_hdr_window(ANativeWindow *window, int w, int h)
++{
++    if (!window)
++        return;
++    ANativeWindow_setBuffersGeometry(window, w, h,
++                                     AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM);
++    android_set_dataspace(window, ADATASPACE_BT2020_PQ);
++}
++
++// 告诉 libplacebo 交换链的目标色彩空间是 HDR10，vo_gpu_next 会据此挑选
++// HDR 的 surface format 并按 PQ 编码输出。
++static pl_color_space_t android_preferred_csp(struct ra_ctx *ctx)
++{
++    if (!android_is_hdr(ctx))
++        return (pl_color_space_t){0};
++    return pl_color_space_hdr10;
++}
++
++static int android_color_depth(struct ra_ctx *ctx)
++{
++    return android_is_hdr(ctx) ? 10 : -1;
++}
++
+ struct priv {
+     struct mpvk_ctx vk;
+ };
+@@ -45,6 +111,14 @@ static bool android_init(struct ra_ctx *ctx)
+     if (!vo_android_init(ctx->vo))
+         goto fail;
+ 
++    // 在创建 Vulkan surface 之前先把窗口设成 HDR：WSI 会按窗口的
++    // format / dataspace 推导 surface 的 format 与 colorSpace。
++    if (android_is_hdr(ctx)) {
++        int w, h;
++        if (vo_android_surface_size(ctx->vo, &w, &h))
++            android_apply_hdr_window(vo_android_native_window(ctx->vo), w, h);
++    }
++
+     if (!mpvk_init(vk, ctx, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME))
+         goto fail;
+ 
+@@ -53,7 +127,10 @@ static bool android_init(struct ra_ctx *ctx)
+          .window = vo_android_native_window(ctx->vo)
+     };
+ 
+-    struct ra_ctx_params params = {0};
++    struct ra_ctx_params params = {
++        .color_depth   = android_color_depth,
++        .preferred_csp = android_preferred_csp,
++    };
+ 
+     VkInstance inst = vk->vkinst->instance;
+     VkResult res = vkCreateAndroidSurfaceKHR(inst, &info, NULL, &vk->surface);
+@@ -80,8 +157,13 @@ static bool android_reconfig(struct ra_ctx *ctx)
+     // Update window geometry to prevent screen tearing
+     ANativeWindow *native_window = vo_android_native_window(ctx->vo);
+     if (native_window) {
+-        int32_t current_format = ANativeWindow_getFormat(native_window);
+-        ANativeWindow_setBuffersGeometry(native_window, w, h, current_format);
++        if (android_is_hdr(ctx)) {
++            // 保持 10bit BT.2020/PQ（setBuffersGeometry 会复位 dataspace）
++            android_apply_hdr_window(native_window, w, h);
++        } else {
++            int32_t current_format = ANativeWindow_getFormat(native_window);
++            ANativeWindow_setBuffersGeometry(native_window, w, h, current_format);
++        }
+     }
+ 
+     ra_vk_ctx_resize(ctx, w, h);
