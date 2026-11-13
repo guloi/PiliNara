@@ -1,39 +1,25 @@
-class FansMedalDetail {
-  int? medalId;
-  int? targetId;
-  String? medalName;
-  int? level;
-  int? intimacy;
-  int? nextIntimacy;
-  int? dayLimit;
-  int? todayFeed;
-  int? isLighted;
-  int? wearingStatus;
+class Medal {
+  int intimacy;
+  int nextIntimacy;
 
-  FansMedalDetail({
-    this.medalId,
-    this.targetId,
-    this.medalName,
-    this.level,
-    this.intimacy,
-    this.nextIntimacy,
-    this.dayLimit,
-    this.todayFeed,
-    this.isLighted,
-    this.wearingStatus,
+  int todayFeed;
+  int dayLimit;
+
+  int wearingStatus;
+
+  Medal({
+    required this.intimacy,
+    required this.nextIntimacy,
+    required this.todayFeed,
+    required this.dayLimit,
+    required this.wearingStatus,
   });
 
-  factory FansMedalDetail.fromJson(Map<String, dynamic> json) =>
-      FansMedalDetail(
-        medalId: json['medal_id'] as int?,
-        targetId: json['target_id'] as int?,
-        medalName: json['medal_name'] as String?,
-        level: json['level'] as int?,
-        intimacy: json['intimacy'] as int?,
-        nextIntimacy: json['next_intimacy'] as int?,
-        dayLimit: json['day_limit'] as int?,
-        todayFeed: json['today_feed'] as int?,
-        isLighted: json['is_lighted'] as int?,
-        wearingStatus: json['wearing_status'] as int?,
-      );
+  factory Medal.fromJson(Map<String, dynamic> json) => Medal(
+    intimacy: json['intimacy'] ?? 0,
+    nextIntimacy: json['next_intimacy'] ?? 0,
+    todayFeed: json['today_feed'] ?? 0,
+    dayLimit: json['day_limit'] ?? 0,
+    wearingStatus: json['wearing_status'] ?? 0,
+  );
 }

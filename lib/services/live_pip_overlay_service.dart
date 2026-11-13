@@ -95,8 +95,7 @@ class LivePipOverlayService {
       return;
     }
     saved
-      ..closeLiveMsg()
-      ..cancelLiveTimer()
+      ..stopService()
       ..cancelLikeTimer();
     videoPlayerServiceHandler?.onVideoDetailDispose(saved.heroTag);
   }

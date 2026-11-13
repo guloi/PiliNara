@@ -49,12 +49,11 @@ abstract final class Api {
   // https://api.bilibili.com/x/web-interface/archive/like
   // static const String likeVideo = '/x/web-interface/archive/like';
 
-  /// web端点赞接口（无access_key时fallback）
-  static const String likeVideoWeb = '/x/web-interface/archive/like';
-
-
   // 改用app端点赞接口
   static const String likeVideo = '${HttpString.appBaseUrl}/x/v2/view/like';
+
+  /// web端点赞接口（无access_key时fallback）
+  static const String likeVideoWeb = '/x/web-interface/archive/like';
   //判断视频是否被点赞（双端）Get
   // access_key	str	APP登录Token	APP方式必要
   /// aid	num	稿件avid	必要（可选）	avid与bvid任选一个
@@ -80,14 +79,13 @@ abstract final class Api {
   /// select_like	num	是否附加点赞	非必要	0：不点赞 1：同时点赞 默认为0
   // csrf	str	CSRF Token（位于cookie）	必要
   // https://api.bilibili.com/x/web-interface/coin/add
-
-  /// web端投币接口（无access_key时fallback）
-  static const String coinVideoWeb = '/x/web-interface/coin/add';
-
   // static const String coinVideo = '/x/web-interface/coin/add';
 
   // 改用app端投币接口
   static const String coinVideo = '${HttpString.appBaseUrl}/x/v2/view/coin/add';
+
+  /// web端投币接口（无access_key时fallback）
+  static const String coinVideoWeb = '/x/web-interface/coin/add';
 
   // 判断视频是否被投币（双端）GET
   // access_key	str	APP登录Token	APP方式必要
@@ -1037,12 +1035,29 @@ abstract final class Api {
   static const String liveMasterInfo =
       '${HttpString.liveBaseUrl}/live_user/v1/Master/info';
 
-  static const String liveFansMedalPanel =
-      '${HttpString.liveBaseUrl}/xlive/app-ucenter/v1/fansMedal/panel';
+  static const String _liveTrace =
+      '${HttpString.liveTraceBaseUrl}/xlive/data-interface/v1/x25Kn';
 
-  static const String liveFansMedalWear =
-      '${HttpString.liveBaseUrl}/xlive/app-ucenter/v1/fansMedal/wear';
+  static const String liveTraceE = '$_liveTrace/E';
 
-  static const String liveFansMedalTakeOff =
-      '${HttpString.liveBaseUrl}/xlive/app-ucenter/v1/fansMedal/take_off';
+  static const String liveTraceX = '$_liveTrace/X';
+
+  static const String _fansMedal =
+      '${HttpString.liveBaseUrl}/xlive/app-ucenter/v1/fansMedal';
+
+  static const String fansMedalPanel = '$_fansMedal/panel';
+
+  static const String userMedalInfo = '$_fansMedal/user_medal_info';
+
+  static const String wearFansMedal = '$_fansMedal/wear';
+
+  static const String takeOffFansMedal = '$_fansMedal/take_off';
+
+  static const String delFansMedal = '$_fansMedal/web_room/del_medal';
+
+  static const String liveConfigPlugs =
+      '${HttpString.liveBaseUrl}/xlive/web-ucenter/v1/labs/ConfigPlugs';
+
+  static const String liveEditPlugs =
+      '${HttpString.liveBaseUrl}/xlive/web-ucenter/v1/labs/EditPlugs';
 }
