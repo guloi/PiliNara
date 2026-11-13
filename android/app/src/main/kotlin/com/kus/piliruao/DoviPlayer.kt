@@ -1,4 +1,4 @@
-package com.example.pilinara
+package com.kus.piliruao
 
 import android.app.Activity
 import android.net.Uri

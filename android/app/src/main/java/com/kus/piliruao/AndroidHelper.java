@@ -1,7 +1,7 @@
-package com.example.pilinara;
+package com.kus.piliruao;
 
-import static com.example.pilinara.MediaHelper.getCustomRemoteAction;
-import static com.example.pilinara.MediaHelper.getRemoteAction;
+import static com.kus.piliruao.MediaHelper.getCustomRemoteAction;
+import static com.kus.piliruao.MediaHelper.getRemoteAction;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;

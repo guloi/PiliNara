@@ -33,7 +33,7 @@ import 'package:path/path.dart' as path;
 Future<VideoPlayerServiceHandler> initAudioService() {
   if (Platform.isLinux) {
     AudioServiceMpris.init(
-      dBusName: 'com.example.pilinara.audio',
+      dBusName: 'com.kus.piliruao.audio',
       identity: Constants.appName,
       desktopEntry: 'com.example.pilinara',
       canGoNext: true,
@@ -46,7 +46,7 @@ Future<VideoPlayerServiceHandler> initAudioService() {
   return AudioService.init(
     builder: VideoPlayerServiceHandler.new,
     config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.example.pilinara.audio',
+      androidNotificationChannelId: 'com.kus.piliruao.audio',
       androidNotificationChannelName: 'Audio Service ${Constants.appName}',
       androidNotificationOngoing: true,
       androidStopForegroundOnPause: true,

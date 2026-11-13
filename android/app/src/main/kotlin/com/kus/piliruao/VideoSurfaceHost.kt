@@ -1,4 +1,4 @@
-package com.example.pilinara
+package com.kus.piliruao
 
 import android.app.Activity
 import android.graphics.Bitmap
@@ -26,7 +26,7 @@ import java.lang.reflect.Method
  * 第 0 层（FlutterView 之下），Flutter 的 surface 在透明模式下仍然绘制在它上方，
  * 于是视频在底层、弹幕与控制栏正常叠加，并且真正走 SurfaceView 的 10bit / HDR 通路。
  *
- * 播放器通过 `com.pilinara/video_surface` 通道驱动本类：
+ * 播放器通过 `com.kus.piliruao/video_surface` 通道驱动本类：
  * - `create`：首次创建（或在页面/小窗之间转移所有权时复用）SurfaceView；
  * - `setRect`：把 SurfaceView 摆到 Flutter 上报的物理像素矩形；
  * - `setHdr`：保留的兼容方法（当前不再主动请求窗口 HDR 色彩模式，避免整屏高亮闪屏）；

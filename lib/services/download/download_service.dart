@@ -1108,7 +1108,7 @@ class DownloadService extends GetxService {
   }
 
   static String get _exportBasePath =>
-      path.join('/storage/emulated/0/Download', 'PiliNara');
+      path.join('/storage/emulated/0/Download', 'piliruao');
 
   static Future<String> exportEntry(
     BiliDownloadEntryInfo entry,

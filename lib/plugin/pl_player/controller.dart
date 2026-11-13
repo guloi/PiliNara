@@ -3049,7 +3049,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'video-sync': Pref.videoSync,
       if (Platform.isAndroid) 'ao': Pref.audioOutput,
       if (_hdrVerboseLog) ...{
-        'log-file': '/sdcard/Android/data/com.example.pilinara/files/mpv.log',
+        'log-file': '/sdcard/Android/data/com.kus.piliruao/files/mpv.log',
         'msg-level': 'all=v',
       },
     };

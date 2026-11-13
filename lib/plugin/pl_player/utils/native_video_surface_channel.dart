@@ -13,7 +13,7 @@ import 'package:flutter/services.dart';
 /// 位于 Flutter 渲染层之上，会盖住弹幕与控制栏。
 abstract final class NativeVideoSurfaceChannel {
   static const MethodChannel channel = MethodChannel(
-    'com.pilinara/video_surface',
+    'com.kus.piliruao/video_surface',
   );
 
   /// 创建（或复用）原生 SurfaceView，并把它摆到物理像素矩形。

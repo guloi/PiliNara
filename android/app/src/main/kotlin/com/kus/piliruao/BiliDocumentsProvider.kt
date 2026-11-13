@@ -1,4 +1,4 @@
-package com.example.pilinara
+package com.kus.piliruao
 
 import android.annotation.SuppressLint
 import android.content.Context

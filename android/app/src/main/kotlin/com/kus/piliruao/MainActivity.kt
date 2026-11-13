@@ -1,4 +1,4 @@
-package com.example.pilinara
+package com.kus.piliruao
 
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -204,7 +204,7 @@ class MainActivity : AudioServiceActivity() {
         doviPlayer?.release()
         doviPlayer = null
 
-        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "PiliNara")
+        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "piliruao")
         methodChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 else -> result.notImplemented()
@@ -214,7 +214,7 @@ class MainActivity : AudioServiceActivity() {
         // HDR 视频底层（SurfaceView）控制通道
         val surfaceChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "com.pilinara/video_surface",
+            "com.kus.piliruao/video_surface",
         )
         val host = VideoSurfaceHost(this, surfaceChannel)
         videoSurfaceHost = host
@@ -266,7 +266,7 @@ class MainActivity : AudioServiceActivity() {
                         }
                         runCatching {
                             window.setColorMode(requested)
-                        }.onFailure { Log.w("PiliNara", "setColorMode failed", it) }
+                        }.onFailure { Log.w("piliruao", "setColorMode failed", it) }
                         applied = window.colorMode
                         if (applied != requested) {
                             // setColorMode 走 Window.mColorMode，某些 ROM 会被随后
@@ -276,11 +276,11 @@ class MainActivity : AudioServiceActivity() {
                                 lp.colorMode = requested
                                 window.attributes = lp
                             }.onFailure {
-                                Log.w("PiliNara", "layoutParams colorMode failed", it)
+                                Log.w("piliruao", "layoutParams colorMode failed", it)
                             }
                             val retried = window.colorMode
                             Log.w(
-                                "PiliNara",
+                                "piliruao",
                                 "setWindowHdr requested=$requested(${colorModeLabel(requested)}) " +
                                     "applied=$applied(${colorModeLabel(applied)}) " +
                                     "retried=$retried(${colorModeLabel(retried)})",
