@@ -610,6 +610,20 @@ HDR / 杜比视界走 EGL 才不会被旋转拖进 CLIENT 合成。开启后 `_h
 然后全屏看「HDR 状态诊断」：`后端: gpu-next (opengl)`、`VO 输出色彩: bt.2020 / pq`、
 `HDR 输出选项（android-vulkan-hdr）: yes`，再对比 SurfaceFlinger dump 里视频层是否变成
 `DEVICE/DEVICE`。
+### 7.9 诊断总开关：启用 HDR 诊断
+
+上面这些日志、快照和 PixelCopy 采样都不是免费的：`MPVLogLevel.v` 会把 mpv 的每条
+日志都送过 MethodChannel，5 秒一次的快照要读十几个 mpv 属性，全屏之后还要跑一次
+PixelCopy 加显示端复查。所以统一由一个总开关控制：「设置 → HDR / 杜比视界 →
+启用 HDR 诊断」（`SettingBoxKey.hdrDebug` / `Pref.hdrDebug`，默认关）。
+
+* 开：记录 VO / 交换链日志与 level 到达计数、每 5 秒一次的快照、全屏稳定 1.8s 后的
+  PixelCopy 采样与显示端复查，mpv 日志等级按诊断对话框右上角选的来；
+* 关：以上全部停止，`hdrDebugInfo` 只保留实时读取的 mpv 属性，mpv 日志等级固定
+  `error`（VO 初始化失败的自动回退仍依赖 error 行，不受影响）。
+
+开关立即生效（`PlPlayerController.refreshHdrDiagnostics()` 会立刻启停快照定时器、
+清空已收集的时间线），只有 mpv 日志等级要重开视频——它只在 `Player.create` 时下发。
 ## 八、代码位置
 
 | 文件 | 作用 |

@@ -383,6 +383,7 @@ abstract final class SettingBoxKey {
       portraitRC = 'portraitRC',
       portraitNewv = 'portraitNewv',
       portraitRandom = 'portraitRandom';
+  static const String hdrDebug = 'hdrDebug';
 }
 
 abstract final class LocalCacheKey {

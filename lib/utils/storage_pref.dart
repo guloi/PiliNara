@@ -1930,6 +1930,12 @@ abstract final class Pref {
   static set bvJumpToastText(String value) =>
       _setting.put(SettingBoxKey.bvJumpToastText, value);
 
+  static bool get hdrDebug =>
+      _setting.get(SettingBoxKey.hdrDebug,
+          defaultValue:false);
+
+  static set hdrDebug(bool value) =>
+      _setting.put(SettingBoxKey.hdrDebug, value);
 
   static bool get allowAv =>
       _setting.get(SettingBoxKey.allowAv,

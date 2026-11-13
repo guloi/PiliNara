@@ -14,23 +14,30 @@ import 'package:material_ui/material_ui.dart';
 /// HDR / 杜比视界专项设置页。
 ///
 /// 从「音视频设置」进入，避免这些低频选项把主列表撑得过长。
-class HdrSettingsPage extends StatelessWidget {
+class HdrSettingsPage extends StatefulWidget {
   const HdrSettingsPage({super.key});
 
   @override
+  State<HdrSettingsPage> createState() => _HdrSettingsPageState();
+}
+
+class _HdrSettingsPageState extends State<HdrSettingsPage> {
+  @override
   Widget build(BuildContext context) {
+    // 诊断开关会改变列表里其它项的副标题，所以整页按 setState 重建。
+    final settings = hdrSettings(() => setState(() {}));
     return SimpleScaffold(
       appBar: AppBar(title: const Text('HDR / 杜比视界')),
       body: ListView.builder(
         padding: const EdgeInsets.only(bottom: 100),
-        itemCount: hdrSettings.length,
-        itemBuilder: (context, index) => hdrSettings[index].widget,
+        itemCount: settings.length,
+        itemBuilder: (context, index) => settings[index].widget,
       ),
     );
   }
 }
 
-List<SettingsModel> get hdrSettings => [
+List<SettingsModel> hdrSettings(VoidCallback setState) => [
   SwitchModel(
     title: 'HDR 支持',
     subtitle: '为 HDR / 杜比视界片源启用色调映射与广色域处理，关闭后保持默认渲染',
@@ -132,6 +139,20 @@ List<SettingsModel> get hdrSettings => [
     onTap: _showDoviAudioOffsetDialog,
   ),
   SwitchModel(
+    title: '启用 HDR 诊断',
+    subtitle:
+        '开启后才收集 mpv 的 VO / 交换链日志、全屏与半屏快照、原生 Surface 采样，'
+        '用于排查 HDR 不生效；关闭时只读取实时参数，日志等级固定 error。'
+        '开关立即生效，日志等级要重开视频',
+    leading: const Icon(Icons.bug_report_outlined),
+    setKey: SettingBoxKey.hdrDebug,
+    defaultVal: false,
+    onChanged: (value) {
+      PlPlayerController.instance?.refreshHdrDiagnostics();
+      setState();
+    },
+  ),
+  SwitchModel(
     title: '（诊断）全屏半分辨率出画',
     subtitle:
         '全屏时仍按半屏的像素尺寸写 mpv 交换链，由系统放大到全屏。'
@@ -145,7 +166,9 @@ List<SettingsModel> get hdrSettings => [
   ),
   NormalModel(
     title: 'HDR 状态诊断',
-    subtitle: '查看当前片源的 mpv 色彩、解码方式与色调映射参数，用于排查 HDR 不生效',
+    getSubtitle: () => Pref.hdrDebug
+        ? '查看当前片源的 mpv 色彩、解码方式与色调映射参数，用于排查 HDR 不生效'
+        : '诊断未开启：先打开上方「启用 HDR 诊断」，否则只能看到实时参数、没有时间线',
     leading: const Icon(Icons.bug_report),
     onTap: _showHdrDebugDialog,
   ),
@@ -179,9 +202,14 @@ Future<void> _showHdrDebugDialog(
       PlPlayerController.instance?.hdrDebugInfo ??
       PlPlayerController.lastHdrInfo;
   final surfaceInfo = await NativeVideoSurfaceChannel.surfaceInfo();
-  final detail = surfaceInfo == null
+  final hint = Pref.hdrDebug
+      ? ''
+      : '诊断记录未开启（页面上方「启用 HDR 诊断」）：'
+          '下面只有实时读取的参数，VO 日志与快照时间线为空\n\n';
+  final body = surfaceInfo == null
       ? info
       : '$info\n\n--- 原生层 ---\n$surfaceInfo';
+  final detail = '$hint$body';
   await showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(

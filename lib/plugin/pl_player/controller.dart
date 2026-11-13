@@ -1563,6 +1563,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         ? '否'
         : '是（${isDolbyVisionProfile5 ? 'profile 5' : 'profile 8'}）';
     return [
+      if (!Pref.hdrDebug)
+        '诊断记录未开启（设置 → HDR / 杜比视界 → 启用 HDR 诊断）：'
+            '下面只有实时读取的 mpv 参数，VO 日志与快照时间线为空',
       '出画路径: ${native ? 'SurfaceView(HDR)' : 'Texture(8bit)'}',
       if (_useMedia3Dovi)
         '真 DoVi 解码: Media3 / ExoPlayer（视频 + 音频），'
@@ -1639,10 +1642,33 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     ].join('\n');
   }
 
+  /// 诊断总开关（`Pref.hdrDebug`）变化后立即生效。
+  ///
+  /// 开启即开始抓快照，关闭则停掉定时器并清空已收集的时间线。
+  /// mpv 日志等级只在 `Player.create` 时下发，这一项仍要重开视频才生效。
+  void refreshHdrDiagnostics() {
+    if (!Pref.hdrDebug) {
+      _hdrSnapshotTimer?.cancel();
+      _hdrSnapshotTimer = null;
+      _fullScreenSnapshotTimer?.cancel();
+      _fullScreenSnapshotTimer = null;
+      _nativeProbeTimer?.cancel();
+      _nativeProbeTimer = null;
+      _mpvVoLog.clear();
+      _mpvLogLevelCounts.clear();
+      return;
+    }
+    if (_videoPlayerController != null) _startHdrSnapshot();
+  }
+
   /// 播放期间每 5 秒刷新一次 [hdrDebugInfo] 快照，供下播后查看。
   void _startHdrSnapshot() {
     _hdrSnapshotTimer?.cancel();
     _fullScreenSnapshotTimer?.cancel();
+    if (!Pref.hdrDebug) {
+      _hdrSnapshotTimer = null;
+      return;
+    }
     _hdrSnapshotTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_videoPlayerController == null) return;
       final info = hdrDebugInfo;
@@ -1662,6 +1688,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 尺寸变化防抖 200ms、Vulkan VO 重建都要时间，抓得太早读到的是重建
   /// 过程中的状态；1.8s 后基本稳定，反映的才是「全屏播放时」的真实参数。
   void _scheduleFullScreenSnapshot() {
+    if (!Pref.hdrDebug) return;
     _fullScreenSnapshotTimer?.cancel();
     _fullScreenSnapshotTimer = Timer(const Duration(milliseconds: 1800), () {
       _fullScreenSnapshotTimer = null;
@@ -2149,6 +2176,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   /// 是否遮盖影响。数据会写入 HDR 状态快照，不再自动回退出画方式——
   /// 早期自动回退会在杜比/暗场首帧误判，把正常播放切回纹理。
   void _scheduleNativeProbe() {
+    if (!Pref.hdrDebug) return;
     if (!nativeSurfaceMode.value || !isHdrSource) return;
     _nativeProbeTimer?.cancel();
     _nativeProbeTimer = Timer(const Duration(milliseconds: 2500), () {
@@ -2158,6 +2186,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   Future<void> _probeNativeSurface() async {
+    if (!Pref.hdrDebug) return;
     final owner = _nativeOwner;
     if (owner == null || !nativeSurfaceMode.value) return;
     // 全屏刚切完时 SurfaceView 还在 relayout，第一次 PixelCopy 常常拿不到
@@ -2999,6 +3028,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   /// 往 [_mpvVoLog] 追加一行（带时间戳，便于对齐全屏/尺寸变化的时刻）。
   void _noteVoLog(String line) {
+    // 诊断总开关关掉时不再记录，见 docs/hdr.md 7.9。
+    if (!Pref.hdrDebug) return;
     final stamp = DateTime.now().toIso8601String().substring(11, 23);
     _mpvVoLog.add('$stamp $line');
     if (_mpvVoLog.length > _mpvVoLogLimit) _mpvVoLog.removeAt(0);
@@ -3047,14 +3078,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
     final hwdec = _resolveHwdec();
 
-    final mpvLogLevel = switch (Pref.logLevelType) {
-      LogLevelType.v => MPVLogLevel.v,
-      LogLevelType.info => MPVLogLevel.info,
-      LogLevelType.warn => MPVLogLevel.warn,
-      LogLevelType.error => MPVLogLevel.error,
-      LogLevelType.debug => MPVLogLevel.debug,
-      LogLevelType.trace => MPVLogLevel.trace,
-    };
+    // 诊断关闭时固定 error：info/v 会把 mpv 的每条日志都送过 MethodChannel，
+    // 只有排查 HDR 出画时才需要。VO 初始化失败的自动回退靠 error 行，不受影响。
+    final mpvLogLevel = !Pref.hdrDebug
+        ? MPVLogLevel.error
+        : switch (Pref.logLevelType) {
+            LogLevelType.v => MPVLogLevel.v,
+            LogLevelType.info => MPVLogLevel.info,
+            LogLevelType.warn => MPVLogLevel.warn,
+            LogLevelType.error => MPVLogLevel.error,
+            LogLevelType.debug => MPVLogLevel.debug,
+            LogLevelType.trace => MPVLogLevel.trace,
+          };
 
     final player = await Player.create(
       configuration: PlayerConfiguration(
@@ -3083,8 +3118,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       // 交换链 / 色彩空间相关的日志不分 level 都留一份：libplacebo 建交换链时
       // 打的「Available surface configurations / Picked surface configuration」
       // 恰好是全屏后「有没有 10bit + HDR 面」的唯一证据。
-      _mpvLogLevelCounts[log.level] = (_mpvLogLevelCounts[log.level] ?? 0) + 1;
-      if (_isVoDiagLog(log)) _noteVoLog('${log.prefix}: ${log.text}');
+      if (Pref.hdrDebug) {
+        _mpvLogLevelCounts[log.level] =
+            (_mpvLogLevelCounts[log.level] ?? 0) + 1;
+        if (_isVoDiagLog(log)) _noteVoLog('${log.prefix}: ${log.text}');
+      }
       if (log.level != 'error' && log.level != 'fatal') return;
       final line = '${log.prefix}: ${log.text}';
       _mpvErrorLog.add(line);
