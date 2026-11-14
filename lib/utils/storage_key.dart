@@ -384,6 +384,13 @@ abstract final class SettingBoxKey {
       portraitNewv = 'portraitNewv',
       portraitRandom = 'portraitRandom';
   static const String hdrDebug = 'hdrDebug';
+
+  /// GitHub 设置同步：仓库（owner/repo）、分支、归档路径、Token、Pages 链接。
+  static const String githubSyncRepo = 'githubSyncRepo',
+      githubSyncBranch = 'githubSyncBranch',
+      githubSyncPath = 'githubSyncPath',
+      githubSyncToken = 'githubSyncToken',
+      githubSyncPagesUrl = 'githubSyncPagesUrl';
 }
 
 abstract final class LocalCacheKey {

@@ -1937,6 +1937,39 @@ abstract final class Pref {
   static set hdrDebug(bool value) =>
       _setting.put(SettingBoxKey.hdrDebug, value);
 
+  /// GitHub 设置同步：仓库（owner/repo）、分支、归档路径、Token、Pages 链接。
+  static String get githubSyncRepo =>
+      _setting.get(SettingBoxKey.githubSyncRepo, defaultValue: '');
+
+  static set githubSyncRepo(String value) =>
+      _setting.put(SettingBoxKey.githubSyncRepo, value);
+
+  static String get githubSyncBranch =>
+      _setting.get(SettingBoxKey.githubSyncBranch, defaultValue: '');
+
+  static set githubSyncBranch(String value) =>
+      _setting.put(SettingBoxKey.githubSyncBranch, value);
+
+  static String get githubSyncPath => _setting.get(
+    SettingBoxKey.githubSyncPath,
+    defaultValue: 'piliruao-settings.zip',
+  );
+
+  static set githubSyncPath(String value) =>
+      _setting.put(SettingBoxKey.githubSyncPath, value);
+
+  static String get githubSyncToken =>
+      _setting.get(SettingBoxKey.githubSyncToken, defaultValue: '');
+
+  static set githubSyncToken(String value) =>
+      _setting.put(SettingBoxKey.githubSyncToken, value);
+
+  static String get githubSyncPagesUrl =>
+      _setting.get(SettingBoxKey.githubSyncPagesUrl, defaultValue: '');
+
+  static set githubSyncPagesUrl(String value) =>
+      _setting.put(SettingBoxKey.githubSyncPagesUrl, value);
+
   static bool get allowAv =>
       _setting.get(SettingBoxKey.allowAv,
           defaultValue:false);

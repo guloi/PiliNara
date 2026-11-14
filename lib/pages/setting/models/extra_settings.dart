@@ -14,6 +14,7 @@ import 'package:PiliPlus/models/common/sponsor_block/skip_type.dart';
 import 'package:PiliPlus/pages/common/slide/common_slide_page.dart';
 import 'package:PiliPlus/pages/home/controller.dart';
 import 'package:PiliPlus/pages/setting/models/model.dart';
+import 'package:PiliPlus/pages/setting/widgets/github_sync_dialog.dart';
 import 'package:PiliPlus/pages/setting/widgets/slider_dialog.dart';
 import 'package:PiliPlus/services/download/download_service.dart';
 import 'package:PiliPlus/utils/accounts.dart';
@@ -89,6 +90,17 @@ List<SettingsModel> get extraSettings => [
     leading: const Icon(Icons.auto_awesome),
     getSubtitle: () => '配置 OpenAI 兼容 API 和提示词模板',
     onTap: (context, _) => Get.toNamed('/aiSetting'),
+  ),
+  NormalModel(
+    title: 'GitHub 设置同步',
+    leading: const Icon(Icons.cloud_outlined),
+    getSubtitle: () {
+      final repo = Pref.githubSyncRepo;
+      return repo.isEmpty
+          ? '把设置压缩包同步到 GitHub 仓库，或从仓库 / Pages 链接下载'
+          : '仓库：$repo';
+    },
+    onTap: (context, _) => showGithubSyncDialog(context),
   ),
   if (Platform.isAndroid) ...[
     const SplitModel(

@@ -5,6 +5,7 @@ import 'dart:typed_data' show Uint8List;
 
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/dialog/simple_dialog_option.dart';
+import 'package:PiliPlus/pages/setting/widgets/github_sync_dialog.dart';
 import 'package:PiliPlus/utils/config_archive.dart';
 import 'package:PiliPlus/utils/date_utils.dart';
 import 'package:PiliPlus/utils/extension/file_ext.dart';
@@ -339,6 +340,13 @@ Future<void> showDataImportExportDialog(BuildContext context) {
             onPressed: () {
               Get.back();
               _importAllDataFromArchive(pageContext);
+            },
+          ),
+          DialogOption(
+            child: const Text('GitHub 同步设置', style: style),
+            onPressed: () {
+              Get.back();
+              showGithubSyncDialog(pageContext);
             },
           ),
         ],
