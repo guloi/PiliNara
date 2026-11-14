@@ -13,8 +13,6 @@ import 'package:PiliPlus/utils/android/bindings.g.dart';
 import 'package:PiliPlus/utils/app_scheme.dart';
 import 'package:PiliPlus/utils/desktop/tray_controller.dart';
 import 'package:PiliPlus/utils/desktop/window_controller.dart';
-import 'package:PiliPlus/utils/extension/context_ext.dart';
-import 'package:PiliPlus/utils/extension/size_ext.dart';
 import 'package:PiliPlus/utils/extension/theme_ext.dart';
 import 'package:PiliPlus/utils/mobile_observer.dart';
 import 'package:PiliPlus/utils/platform_utils.dart';
@@ -79,7 +77,7 @@ class _MainAppState extends PopScopeState<MainApp>
       if (Pref.autoSideBar) {
         _mainController.useBottomNav = size.width < Pref.sideBarThreshold;
       } else {
-        _mainController.useBottomNav = size.isPortrait;
+        _mainController.useBottomNav = MediaQuery.isPortraitOf(context);
       }
     }
   }
@@ -244,7 +242,7 @@ class _MainAppState extends PopScopeState<MainApp>
 
   Widget _sideBar() {
     if (_mainController.navigationBars.length > 1) {
-      if (context.isTablet && _mainController.optTabletNav) {
+      if (MediaQuery.isTabletOf(context) && _mainController.optTabletNav) {
         return Padding(
           padding: const .only(top: 25),
           child: MediaQuery.removePadding(

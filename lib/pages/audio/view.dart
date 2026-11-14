@@ -30,9 +30,7 @@ import 'package:PiliPlus/services/pip_overlay_service.dart';
 import 'package:PiliPlus/services/live_pip_overlay_service.dart';
 import 'package:PiliPlus/utils/date_utils.dart';
 import 'package:PiliPlus/utils/duration_utils.dart';
-import 'package:PiliPlus/utils/extension/context_ext.dart';
 import 'package:PiliPlus/utils/extension/num_ext.dart';
-import 'package:PiliPlus/utils/extension/size_ext.dart';
 import 'package:PiliPlus/utils/extension/string_ext.dart';
 import 'package:PiliPlus/utils/extension/theme_ext.dart';
 import 'package:PiliPlus/utils/global_data.dart';
@@ -92,6 +90,9 @@ class _AudioPageState extends State<AudioPage> {
     AudioController(),
     tag: Get.arguments['heroTag'] ?? Utils.generateRandomString(8),
   );
+  late bool isPortrait;
+  late ColorScheme colorScheme;
+  late EdgeInsets padding;
 
   @override
   void initState() {
@@ -117,13 +118,13 @@ class _AudioPageState extends State<AudioPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _controller.didChangeDependencies(context);
+    colorScheme = ColorScheme.of(context);
+    isPortrait = MediaQuery.isPortraitOf(context);
+    padding = MediaQuery.viewPaddingOf(context);
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.of(context);
-    final isPortrait = MediaQuery.sizeOf(context).isPortrait;
-    final padding = MediaQuery.viewPaddingOf(context);
     return SimpleScaffold(
       appBar: AppBar(
         actions: [
@@ -233,7 +234,7 @@ class _AudioPageState extends State<AudioPage> {
         useSafeArea: true,
         isScrollControlled: true,
         constraints: BoxConstraints(
-          maxWidth: min(640, context.mediaQueryShortestSide),
+          maxWidth: min(640, MediaQuery.shortestSideOf(context)),
         ),
         builder: (context) {
           final colorScheme = ColorScheme.of(context);
@@ -418,7 +419,7 @@ class _AudioPageState extends State<AudioPage> {
           }
           return FractionallySizedBox(
             heightFactor:
-                PlatformUtils.isMobile && !context.mediaQuerySize.isPortrait
+                PlatformUtils.isMobile && !MediaQuery.isPortraitOf(context)
                 ? 1.0
                 : 0.7,
             alignment: Alignment.bottomCenter,
@@ -482,7 +483,7 @@ class _AudioPageState extends State<AudioPage> {
       useSafeArea: true,
       isScrollControlled: true,
       constraints: BoxConstraints(
-        maxWidth: min(640, context.mediaQueryShortestSide),
+        maxWidth: min(640, MediaQuery.shortestSideOf(context)),
       ),
       builder: (context) {
         final colorScheme = ColorScheme.of(context);
@@ -614,7 +615,7 @@ class _AudioPageState extends State<AudioPage> {
       useSafeArea: true,
       isScrollControlled: true,
       constraints: BoxConstraints(
-        maxWidth: min(640, context.mediaQueryShortestSide),
+        maxWidth: min(640, MediaQuery.shortestSideOf(context)),
       ),
       builder: (context) {
         final colorScheme = ColorScheme.of(context);

@@ -233,7 +233,7 @@ class LiveRoomController extends GetxController
           codecIndex: codecIndex,
           liveUrlIndex: liveUrlIndex,
         ),
-        if (!isLoaded.value && heartbeat.isLogin) _fetchBlockRules(),
+        if (!isLoaded.value && isMainLogin) _fetchBlockRules(),
       ]);
 
       // 置于 initLiveUrl 之后：恢复场景的首次拉取靠该标志让 playerInit 跳过
