@@ -26,8 +26,8 @@ class GithubSyncResult {
 /// - 从链接下载：GitHub Pages 等任意可直链的地址；内容若是早先导出的 zip
 ///   归档，仍走 ConfigArchive（见调用方）。
 ///
-/// 隐私：上传前剔除 [sensitiveSettingKeys]（Token、API Key、WebDAV 账号密码）；
-/// 导入后把这些键恢复成本机原来的值，不会被云端内容覆盖。
+/// 隐私：上传前剔除 [sensitiveSettingKeys]（Token、API Key、WebDAV 地址与账号密码、
+/// buvid、同步仓库地址）；导入后把这些键恢复成本机原来的值，不会被云端覆盖。
 ///
 /// 全程使用独立的 [Dio]：GitHub 不是 B 站接口，不能走带拦截器的
 /// `Request()` 单例（参见 `cdn_node_store.dart`）。
@@ -43,15 +43,19 @@ abstract final class GithubConfigSync {
     r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$',
   );
 
-  /// 只存本机、不参与云同步的设置项（凭据类）。
+  /// 只存本机、不参与云同步的设置项。
   ///
-  /// 目标是「云端文件泄露也不至于泄露账号」：Token、AI 的 API Key、
-  /// WebDAV 的账号密码都属于凭据，换设备时重新填一次即可。
+  /// 目标是「云端文件泄露也不至于泄露账号/设备标识」：Token、AI 的 API Key、
+  /// WebDAV 的地址与账号密码、buvid（B 站设备指纹）、同步用的仓库地址。
+  /// 换设备时重新填一次即可。
   static const Set<String> sensitiveSettingKeys = {
     SettingBoxKey.aiApiKey,
+    SettingBoxKey.buvid,
+    SettingBoxKey.githubSyncRepo,
     SettingBoxKey.githubSyncToken,
-    SettingBoxKey.webdavUsername,
     SettingBoxKey.webdavPassword,
+    SettingBoxKey.webdavUri,
+    SettingBoxKey.webdavUsername,
   };
 
   /// 生成待上传的 `setting.json` 字节：与「导出设置」同一份数据，但剔除凭据。

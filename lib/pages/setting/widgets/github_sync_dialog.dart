@@ -327,8 +327,9 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
               ),
               Text(
                 '只同步设置（setting.json），不含账号、黑名单、历史评论与字体；'
-                '上传前会去掉 Token、API Key、WebDAV 账号密码，导入时也不会'
-                '覆盖本机已保存的这几项。Token 以明文保存在本地设置中。',
+                '上传前会去掉 Token、API Key、WebDAV 地址与账号密码、buvid、'
+                '仓库地址，导入时也不会覆盖本机已保存的这几项。'
+                'Token 以明文保存在本地设置中。',
                 style: TextStyle(fontSize: 12, color: colorScheme.outline),
               ),
               const SizedBox(height: 16),
