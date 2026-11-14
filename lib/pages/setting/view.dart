@@ -10,7 +10,6 @@ import 'package:PiliPlus/pages/setting/common_setting.dart';
 import 'package:PiliPlus/pages/setting/dynamics_setting.dart';
 import 'package:PiliPlus/pages/setting/reply_setting.dart';
 import 'package:PiliPlus/pages/setting/widgets/multi_select_dialog.dart';
-import 'package:PiliPlus/pages/webdav/view.dart';
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/accounts/account.dart';
 import 'package:PiliPlus/utils/utils.dart';
@@ -91,7 +90,8 @@ class _SettingPageState extends State<SettingPage> {
       icon: Icon(Icons.extension_outlined),
     ),
     _SettingsModel(
-      type: .webdavSetting,
+      type: .syncSetting,
+      subtitle: 'WebDAV、GitHub 仓库 / Pages、本地归档',
       icon: Icon(MdiIcons.databaseCogOutline),
     ),
     _SettingsModel(
@@ -142,7 +142,8 @@ class _SettingPageState extends State<SettingPage> {
                         settingType: _type,
                         showAppBar: false,
                       ),
-                      .webdavSetting => const WebDavSettingPage(
+                      .syncSetting => CommonSetting(
+                        settingType: _type,
                         showAppBar: false,
                       ),
                       .about => const AboutPage(showAppBar: false),
@@ -173,7 +174,7 @@ class _SettingPageState extends State<SettingPage> {
           .dmSetting ||
           .styleSetting ||
           .extraSetting => CommonSetting(settingType: type),
-          .webdavSetting => const WebDavSettingPage(),
+          .syncSetting => CommonSetting(settingType: type),
           .about => const AboutPage(),
         },
       );

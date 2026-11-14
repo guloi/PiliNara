@@ -284,7 +284,7 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
               const SizedBox(height: 12),
               _field(
                 controller: _token,
-                label: 'Token（可选）',
+                label: 'Token',
                 hint: '上传必填；下载公开仓库可留空',
                 obscure: _hideToken,
                 suffix: IconButton(
@@ -299,7 +299,7 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
               const SizedBox(height: 12),
               _field(
                 controller: _url,
-                label: 'Pages 链接（可选）',
+                label: 'Pages 链接',
                 hint: 'https://user.github.io/repo/settings.zip',
               ),
               Align(
