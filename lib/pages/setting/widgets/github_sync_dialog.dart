@@ -14,8 +14,9 @@ Future<void> showGithubSyncDialog(BuildContext context) => showDialog(
 
 /// 把设置上传到 GitHub 仓库 / 从仓库或 Pages 链接下载并导入。
 ///
-/// 归档格式与「导入/导出所有数据 → 导出到压缩包」完全一致
-/// （见 [ConfigArchive]），因此云端文件也能用现有功能导入。
+/// 云端文件是纯 `setting.json`（见 [GithubConfigSync.buildSettingsJson]），
+/// 上传前剔除 Token、API Key、WebDAV 账号密码；导入旧版上传的 zip 归档
+/// 时仍走 [ConfigArchive]，保持向后兼容。
 class GithubSyncDialog extends StatefulWidget {
   const GithubSyncDialog({super.key});
 
@@ -121,7 +122,7 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
     if (_busy) return;
     final url = _url.text.trim();
     if (url.isEmpty) {
-      _toast('请填写链接（例如 GitHub Pages 上的 zip）');
+      _toast('请填写链接（例如 GitHub Pages 上的 setting.json）');
       return;
     }
     _save();
@@ -140,14 +141,19 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
       return;
     }
     final bytes = result.bytes!;
+    // 早先版本上传的是「导出到压缩包」的 zip 归档，仍支持导入。
+    final isZip = GithubConfigSync.isZipArchive(bytes);
+    final size = (bytes.length / 1024).toStringAsFixed(1);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('用云端归档覆盖当前数据？'),
+        title: Text(isZip ? '用云端归档覆盖当前数据？' : '用云端设置覆盖当前设置？'),
         content: Text(
-          '将导入 ${(bytes.length / 1024).toStringAsFixed(1)} KB 的归档，'
-          '覆盖当前设置、账号信息、历史评论、搜索记录、黑名单与自定义字体，'
-          '此操作不可撤销。',
+          isZip
+              ? '将导入 $size KB 的旧版 zip 归档，覆盖当前设置、账号信息、'
+                    '历史评论、搜索记录、黑名单与自定义字体，此操作不可撤销。'
+              : '将导入 $size KB 的 setting.json，覆盖当前设置；'
+                    '本机保存的 Token、API Key、WebDAV 账号密码不会被覆盖。',
         ),
         actions: [
           TextButton(
@@ -174,35 +180,17 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
     String? importResult;
     Object? failure;
     try {
-      importResult = await ConfigArchive.import(
-        bytes,
-        onWarning: (warning) async {
-          SmartDialog.dismiss();
-          if (!mounted) return false;
-          final ok = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('注意'),
-              content: Text(warning),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: Text(
-                    '取消',
-                    style: TextStyle(color: ColorScheme.of(context).outline),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('继续'),
-                ),
-              ],
-            ),
-          );
-          if (ok == true) SmartDialog.showLoading(msg: '导入中…');
-          return ok == true;
-        },
-      );
+      if (GithubConfigSync.isZipArchive(bytes)) {
+        importResult = await ConfigArchive.import(bytes, onWarning: _onWarning);
+      } else {
+        final error = await GithubConfigSync.importSettingsJson(bytes);
+        if (error == null) {
+          // 归一成「成功且无附加提示」，与 ConfigArchive.import 的返回值对齐。
+          importResult = '';
+        } else {
+          failure = error;
+        }
+      }
     } catch (e) {
       failure = e;
     }
@@ -215,6 +203,34 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
     }
     if (importResult == null) return;
     _toast(importResult.isEmpty ? '导入成功' : '导入成功，但$importResult');
+  }
+
+  /// zip 归档导入前的二次确认（版本不兼容等）。
+  Future<bool> _onWarning(String warning) async {
+    SmartDialog.dismiss();
+    if (!mounted) return false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('注意'),
+        content: Text(warning),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              '取消',
+              style: TextStyle(color: ColorScheme.of(context).outline),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) SmartDialog.showLoading(msg: '导入中…');
+    return ok == true;
   }
 
   /// 由仓库与文件路径推导默认的 GitHub Pages 地址。
@@ -279,7 +295,7 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
               _field(
                 controller: _path,
                 label: '文件路径',
-                hint: '例如 piliruao/settings.zip',
+                hint: '例如 piliruao/setting.json',
               ),
               const SizedBox(height: 12),
               _field(
@@ -300,7 +316,7 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
               _field(
                 controller: _url,
                 label: 'Pages 链接',
-                hint: 'https://user.github.io/repo/settings.zip',
+                hint: 'https://user.github.io/repo/setting.json',
               ),
               Align(
                 alignment: Alignment.centerLeft,
@@ -310,8 +326,9 @@ class _GithubSyncDialogState extends State<GithubSyncDialog> {
                 ),
               ),
               Text(
-                '归档格式与「导出到压缩包」相同（zip），包含设置、账号、黑名单、'
-                '搜索记录与自定义字体。Token 以明文保存在本地设置中。',
+                '只同步设置（setting.json），不含账号、黑名单、历史评论与字体；'
+                '上传前会去掉 Token、API Key、WebDAV 账号密码，导入时也不会'
+                '覆盖本机已保存的这几项。Token 以明文保存在本地设置中。',
                 style: TextStyle(fontSize: 12, color: colorScheme.outline),
               ),
               const SizedBox(height: 16),

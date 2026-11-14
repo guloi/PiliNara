@@ -1,12 +1,12 @@
-import 'dart:convert' show base64Encode;
+import 'dart:convert' show base64Encode, jsonDecode, jsonEncode, utf8;
 import 'dart:typed_data';
 
 import 'package:PiliPlus/http/browser_ua.dart';
-import 'package:PiliPlus/utils/config_archive.dart';
-import 'package:archive/archive.dart' show OutputMemoryStream;
+import 'package:PiliPlus/utils/storage.dart';
+import 'package:PiliPlus/utils/storage_key.dart';
 import 'package:dio/dio.dart';
 
-/// 同步结果：`error == null` 表示成功，此时 [bytes] 为归档字节。
+/// 同步结果：`error == null` 表示成功，此时 [bytes] 为下载到的文件字节。
 class GithubSyncResult {
   const GithubSyncResult.ok(this.bytes) : error = null;
 
@@ -18,12 +18,16 @@ class GithubSyncResult {
   bool get ok => error == null;
 }
 
-/// 把设置同步到 GitHub，复用 [ConfigArchive] 的 zip 归档格式。
+/// 把设置同步到 GitHub（只同步 `setting.json`，不含账号、黑名单、字体）。
 ///
 /// - 上传：`PUT /repos/{repo}/contents/{path}`，文件不存在时新建、存在时按
 ///   已有 sha 更新；
 /// - 从仓库下载：同一个 Contents 接口的 `application/vnd.github.raw`；
-/// - 从链接下载：GitHub Pages 等任意可直链的 zip。
+/// - 从链接下载：GitHub Pages 等任意可直链的地址；内容若是早先导出的 zip
+///   归档，仍走 ConfigArchive（见调用方）。
+///
+/// 隐私：上传前剔除 [sensitiveSettingKeys]（Token、API Key、WebDAV 账号密码）；
+/// 导入后把这些键恢复成本机原来的值，不会被云端内容覆盖。
 ///
 /// 全程使用独立的 [Dio]：GitHub 不是 B 站接口，不能走带拦截器的
 /// `Request()` 单例（参见 `cdn_node_store.dart`）。
@@ -39,13 +43,69 @@ abstract final class GithubConfigSync {
     r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$',
   );
 
-  /// 生成与「导出到压缩包」完全一致的 zip 字节。
-  static Uint8List buildArchive() {
-    final out = OutputMemoryStream();
-    ConfigArchive.export(out);
-    final bytes = out.getBytes();
-    out.closeSync();
-    return bytes;
+  /// 只存本机、不参与云同步的设置项（凭据类）。
+  ///
+  /// 目标是「云端文件泄露也不至于泄露账号」：Token、AI 的 API Key、
+  /// WebDAV 的账号密码都属于凭据，换设备时重新填一次即可。
+  static const Set<String> sensitiveSettingKeys = {
+    SettingBoxKey.aiApiKey,
+    SettingBoxKey.githubSyncToken,
+    SettingBoxKey.webdavUsername,
+    SettingBoxKey.webdavPassword,
+  };
+
+  /// 生成待上传的 `setting.json` 字节：与「导出设置」同一份数据，但剔除凭据。
+  static Uint8List buildSettingsJson() {
+    final data =
+        jsonDecode(GStorage.exportAllSettings()) as Map<String, dynamic>;
+    final settings = data[GStorage.setting.name];
+    if (settings is Map) {
+      settings.removeWhere(
+        (key, _) => sensitiveSettingKeys.contains(key),
+      );
+    }
+    return Uint8List.fromList(utf8.encode(jsonEncode(data)));
+  }
+
+  /// 判断下载内容是 zip 归档（早先版本用「导出到压缩包」上传）。
+  static bool isZipArchive(Uint8List bytes) =>
+      bytes.length >= 4 &&
+      bytes[0] == 0x50 &&
+      bytes[1] == 0x4b &&
+      (bytes[2] == 0x03 || bytes[2] == 0x05 || bytes[2] == 0x07);
+
+  /// 导入 `setting.json`：成功返回 null，失败返回提示文案。
+  ///
+  /// 与 [GStorage.importAllJsonSettings] 的区别是：导入前备份本机的
+  /// [sensitiveSettingKeys]，导入（它会 clear 整个 setting box）后写回，
+  /// 因此云端内容不会覆盖本机保存的 Token / API Key / WebDAV 账号密码。
+  static Future<String?> importSettingsJson(Uint8List bytes) async {
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(bytes));
+    } catch (_) {
+      return '文件不是有效的 JSON';
+    }
+    if (decoded is! Map<String, dynamic>) return '文件不是设置文件';
+    final settings = decoded[GStorage.setting.name];
+    if (settings is! Map<String, dynamic>) {
+      return '文件缺少 ${GStorage.setting.name} 字段';
+    }
+    final video = decoded[GStorage.video.name];
+    if (video is! Map<String, dynamic>) {
+      return '文件缺少 ${GStorage.video.name} 字段';
+    }
+    // 上传端已经剔除过，这里再兜一次：兼容手工编辑或第三方生成的文件。
+    settings.removeWhere((key, _) => sensitiveSettingKeys.contains(key));
+
+    final local = <String, dynamic>{};
+    for (final key in sensitiveSettingKeys) {
+      final value = GStorage.setting.get(key);
+      if (value != null) local[key] = value;
+    }
+    await GStorage.importAllJsonSettings(decoded);
+    if (local.isNotEmpty) await GStorage.setting.putAll(local);
+    return null;
   }
 
   /// 仓库为空或格式不对时返回错误文案。
@@ -98,7 +158,7 @@ abstract final class GithubConfigSync {
         return _statusMessage(code);
       }
 
-      final bytes = buildArchive();
+      final bytes = buildSettingsJson();
       final res = await dio.put<dynamic>(
         url,
         data: {
@@ -119,7 +179,7 @@ abstract final class GithubConfigSync {
     }
   }
 
-  /// 从仓库下载归档字节。
+  /// 从仓库下载文件字节。
   static Future<GithubSyncResult> download({
     required String repo,
     required String path,
@@ -179,7 +239,7 @@ abstract final class GithubConfigSync {
       return const GithubSyncResult.fail('下载到的内容为空');
     }
     if (data.length > _maxBytes) {
-      return const GithubSyncResult.fail('归档超过 64MB，拒绝导入');
+      return const GithubSyncResult.fail('下载内容超过 64MB，拒绝导入');
     }
     return GithubSyncResult.ok(Uint8List.fromList(data));
   }

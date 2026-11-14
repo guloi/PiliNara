@@ -1937,7 +1937,7 @@ abstract final class Pref {
   static set hdrDebug(bool value) =>
       _setting.put(SettingBoxKey.hdrDebug, value);
 
-  /// GitHub 设置同步：仓库（owner/repo）、分支、归档路径、Token、Pages 链接。
+  /// GitHub 设置同步：仓库（owner/repo）、分支、文件路径、Token、Pages 链接。
   static String get githubSyncRepo =>
       _setting.get(SettingBoxKey.githubSyncRepo, defaultValue: '');
 
@@ -1952,7 +1952,7 @@ abstract final class Pref {
 
   static String get githubSyncPath => _setting.get(
     SettingBoxKey.githubSyncPath,
-    defaultValue: 'piliruao-settings.zip',
+    defaultValue: 'setting.json',
   );
 
   static set githubSyncPath(String value) =>
